@@ -16,8 +16,11 @@ from backend.config import settings
 from backend.errors import ExportError
 from backend.utils import logger
 
-# Resolve output directory to absolute path at import time
-OUTPUT_DIR: str = os.path.abspath(settings.output_dir)
+# Resolve output directory — use /tmp on Vercel (read-only filesystem)
+if os.environ.get("VERCEL"):
+    OUTPUT_DIR: str = "/tmp/outputs"
+else:
+    OUTPUT_DIR: str = os.path.abspath(settings.output_dir)
 
 
 def _sanitize_filename(filename: str) -> str:
