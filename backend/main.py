@@ -46,7 +46,7 @@ app.add_exception_handler(ExportError, export_error_handler)
 app.add_exception_handler(Exception, generic_error_handler)
 
 # Include API routes
-app.include_router(router)
+app.include_router(router, prefix="/api")
 
 # Serve frontend static files from the same server
 app.mount("/", StaticFiles(directory="frontend", html=True), name="static")

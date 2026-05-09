@@ -3,7 +3,9 @@
  * Handles API calls, result rendering, rich text formatting, and file export.
  */
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://localhost:8000/api"
+    : "/api";
 
 // --- DOM Elements ---
 const topicInput = document.getElementById("topic-input");
