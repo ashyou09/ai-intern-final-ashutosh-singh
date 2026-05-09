@@ -421,7 +421,8 @@ function renderTable(rows) {
 
 // --- Export Functions ---
 async function exportAs(format) {
-    const filename = currentTopic || "research_output";
+    const rawTopic = currentTopic || "research_output";
+    const filename = rawTopic.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
     // For TXT: send raw markdown text. For PDF: send raw text (backend handles formatting)
     let content = currentRawSummary;

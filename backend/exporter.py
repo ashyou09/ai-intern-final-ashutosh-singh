@@ -226,10 +226,10 @@ def export_pdf(content: str, filename: str) -> str:
                 title_text = m_h2.group(1)
                 # Don't break — keep looking for a better # heading
         # Fallback: use the filename if no heading found in content
-        if not title_text or title_text.lower() in ('overview', 'key findings', 'sources', 'important details'):
+        if not title_text or title_text.lower() in ('overview', 'key findings', 'sources', 'important details', 'related research papers'):
             title_text = filename.replace("_", " ")
 
-        clean_title: str = _clean_text(_strip_markdown(title_text))
+        clean_title: str = _clean_text(_strip_markdown(title_text)).title()
 
         # ---- Styled Title Block ----
         pdf.set_fill_color(30, 64, 136)  # Deep blue banner
