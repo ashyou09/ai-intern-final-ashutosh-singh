@@ -267,6 +267,15 @@ async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
                     text_chunk = chunk.choices[0].delta.content
                     yield f"data: {json.dumps({'type': 'content', 'text': text_chunk})}\n\n"
 
+            # After AI finishes, append papers & sources programmatically
+            papers_md = _build_papers_section(academic_results)
+            sources_md = _build_sources_section(web_results, academic_results)
+            
+            if papers_md:
+                yield f"data: {json.dumps({'type': 'content', 'text': papers_md})}\n\n"
+            if sources_md:
+                yield f"data: {json.dumps({'type': 'content', 'text': sources_md})}\n\n"
+
             # End of stream
             logger.info(f"{config['provider']} model succeeded")
             yield f"data: {json.dumps({'type': 'done', 'sources': list(set(sources)), 'model': config['model'], 'topic': topic})}\n\n"
@@ -294,3 +303,81 @@ def _extract_sources(result: str, sources: list[str]) -> None:
                         sources.append(url)
     except (json.JSONDecodeError, TypeError):
         pass
+
+
+def _build_papers_section(academic_json: str) -> str:
+    """
+    Build a markdown 'Related Research Papers' section from academic search results.
+
+    This is appended programmatically after the AI stream, so it always
+    contains real data regardless of how the AI model behaves.
+
+    Args:
+        academic_json: JSON string from academic paper search.
+
+    Returns:
+        Markdown string with the papers section, or empty string if none.
+    """
+    try:
+        data: list[dict] = json.loads(academic_json)
+        if not data or (len(data) == 1 and "error" in data[0]):
+            return ""
+        lines = ["\n\n## Related Research Papers\n"]
+        for item in data:
+            title = item.get("title", "Untitled")
+            url = item.get("url", "")
+            abstract = item.get("abstract", "")
+            source = item.get("source", "Web")
+            if url:
+                lines.append(f"- **{title}** — {source}")
+                lines.append(f"  - {abstract[:150]}")
+                lines.append(f"  - [{url}]({url})\n")
+        return "\n".join(lines) if len(lines) > 1 else ""
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+
+def _build_sources_section(web_json: str, academic_json: str) -> str:
+    """
+    Build a markdown 'Sources' section from all search results.
+
+    Collects every unique URL from both web and academic results
+    and formats them as clickable markdown links.
+
+    Args:
+        web_json: JSON string from web search results.
+        academic_json: JSON string from academic search results.
+
+    Returns:
+        Markdown string with all source URLs.
+    """
+    urls: list[tuple[str, str]] = []  # (title, url)
+    for raw in [web_json, academic_json]:
+        try:
+            data: list[dict] = json.loads(raw)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        url = item.get("url", item.get("href", ""))
+                        title = item.get("title", url)
+                        if url and "error" not in str(item.get("error", "")):
+                            urls.append((title, url))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    if not urls:
+        return ""
+
+    # Deduplicate by URL
+    seen: set[str] = set()
+    unique: list[tuple[str, str]] = []
+    for title, url in urls:
+        if url not in seen:
+            seen.add(url)
+            unique.append((title, url))
+
+    lines = ["\n\n## Sources\n"]
+    for title, url in unique:
+        lines.append(f"- [{title}]({url})")
+
+    return "\n".join(lines)

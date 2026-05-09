@@ -568,8 +568,8 @@ class Laser {
             this.targetY = Math.random() * height;
         }
         
-        // Base Speed: Start slower globally
-        this.baseSpeed = Math.random() * 4 + 2;
+        // Base Speed: Slow cinematic comet pace
+        this.baseSpeed = Math.random() * 2 + 1;
         this.speed = this.baseSpeed;
         
         // Timing for "suddenly slow" bullet-time effect is now global!
@@ -690,9 +690,9 @@ function animate() {
     timeEffectTimer++;
     let targetDilation = 1.0;
     
-    // Every ~400 frames, trigger a 120-frame global slow motion event
-    if (timeEffectTimer % 400 > 280) {
-        targetDilation = 0.15; // 15% speed (bullet-time)
+    // Every ~500 frames, trigger a 200-frame global slow motion event
+    if (timeEffectTimer % 500 > 300) {
+        targetDilation = 0.1; // 10% speed (deep bullet-time)
     }
     
     // Incredibly smooth interpolation for the whole screen
