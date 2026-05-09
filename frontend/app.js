@@ -633,9 +633,12 @@ class Laser {
     }
     draw() {
         if (!this.active) return;
-        // Draw tail using fixed length in the direction opposite to travel
-        const tailX = this.x - Math.cos(this.angle) * this.tailLength;
-        const tailY = this.y - Math.sin(this.angle) * this.tailLength;
+        // Increase tail length during slomo for more dramatic effect
+        const dynamicTailLength = this.tailLength * (1 + (1 - globalTimeDilation) * 1.5);
+        
+        // Draw tail using dynamic length in the direction opposite to travel
+        const tailX = this.x - Math.cos(this.angle) * dynamicTailLength;
+        const tailY = this.y - Math.sin(this.angle) * dynamicTailLength;
         
         // Gradient from bright head to transparent tail
         const grad = ctx.createLinearGradient(this.x, this.y, tailX, tailY);
@@ -691,7 +694,7 @@ for (let i = 0; i < 6; i++) {
     setTimeout(() => { lasers.push(new Laser()); }, i * 600);
 }
 
-let globalTimeDilation = 1.0;
+let globalTimeDilation = 2.0;
 let timeEffectTimer = 0;
 
 function animate() {
@@ -701,8 +704,8 @@ function animate() {
     timeEffectTimer++;
     let targetDilation = 1.0;
     
-    // Every ~500 frames, trigger a 200-frame global slow motion event
-    if (timeEffectTimer % 500 > 300) {
+    // Every ~800 frames, trigger a 250-frame global slow motion event (longer interval)
+    if (timeEffectTimer % 1000 > 800) {
         targetDilation = 0.1; // 10% speed (deep bullet-time)
     }
     
