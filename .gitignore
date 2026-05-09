@@ -1,0 +1,33 @@
+# Dependencies
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Outputs (generated at runtime)
+outputs/
+*.pdf
+!requirements.txt
+
+# Temporary
+test_md.pdf
+
+# AI Guides (Do not push to remote)
+AI_RESEARCH_ASSISTANT_PROJECT_GUIDE.md
+CLAUDE_MCP_AND_CLAUDECODE_GUIDE.md
+CLAUDE_WORKING_GUIDE.md
