@@ -1,2 +1,19 @@
+[project]
+name = "ai-intern-final"
+version = "0.1.0"
+description = "AI Research Assistant"
+requires-python = ">=3.9"
+dependencies = [
+    "groq>=0.9.0",
+    "openai>=1.30.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-dotenv>=1.0.0",
+    "pydantic-settings>=2.0.0",
+    "mcp>=1.0.0",
+    "duckduckgo-search>=7.0.0",
+    "fpdf2>=2.7.0"
+]
+
 [tool.vercel]
 entrypoint = "backend.main:app"
