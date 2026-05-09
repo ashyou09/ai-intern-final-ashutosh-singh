@@ -593,7 +593,7 @@ class Laser {
         
         // Fixed tail length — set once so it never jitters or shrinks
         this.tailLength = this.baseSpeed * (Math.random() * 20 + 15);
-        this.color = `hsla(${Math.random() * 60 + 200}, 100%, 85%, 0.9)`; // Brighter opacity and lightness
+        this.color = `hsla(${Math.random() * 60 + 200}, 100%, 80%, 0.65)`; // Softer opacity/lightness
         this.active = true;
     }
     update() {
@@ -646,7 +646,7 @@ class Laser {
         ctx.moveTo(this.x, this.y);
         ctx.lineTo(tailX, tailY);
         ctx.strokeStyle = grad;
-        ctx.lineWidth = 3.5;
+        ctx.lineWidth = 2.5; // Slightly thinner than before
         ctx.lineCap = 'round';
         ctx.stroke();
     }
@@ -706,8 +706,8 @@ function animate() {
         targetDilation = 0.1; // 10% speed (deep bullet-time)
     }
     
-    // Incredibly smooth interpolation for the whole screen
-    globalTimeDilation += (targetDilation - globalTimeDilation) * 0.03;
+    // Incredibly smooth interpolation for the whole screen (slower transition)
+    globalTimeDilation += (targetDilation - globalTimeDilation) * 0.015;
     
     lasers.forEach(laser => {
         laser.update();

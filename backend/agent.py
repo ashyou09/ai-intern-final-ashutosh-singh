@@ -267,14 +267,11 @@ async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
                     text_chunk = chunk.choices[0].delta.content
                     yield f"data: {json.dumps({'type': 'content', 'text': text_chunk})}\n\n"
 
-            # After AI finishes, append papers & sources programmatically
+            # After AI finishes, append papers programmatically
             papers_md = _build_papers_section(academic_results)
-            sources_md = _build_sources_section(web_results, academic_results)
             
             if papers_md:
                 yield f"data: {json.dumps({'type': 'content', 'text': papers_md})}\n\n"
-            if sources_md:
-                yield f"data: {json.dumps({'type': 'content', 'text': sources_md})}\n\n"
 
             # End of stream
             logger.info(f"{config['provider']} model succeeded")
