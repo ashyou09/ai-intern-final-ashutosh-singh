@@ -580,8 +580,8 @@ class Laser {
         this.vx = Math.cos(this.angle) * this.speed;
         this.vy = Math.sin(this.angle) * this.speed;
         
-        // Calculate constant length based on baseSpeed so it doesn't shrink during slow-mo
-        this.length = this.baseSpeed * (Math.random() * 6 + 2);
+        // Fixed tail length — set once so it never jitters or shrinks
+        this.tailLength = this.baseSpeed * (Math.random() * 6 + 4);
         this.color = `hsla(${Math.random() * 60 + 200}, 100%, 75%, 0.45)`; // Brighter opacity
         this.active = true;
     }
@@ -594,8 +594,7 @@ class Laser {
         this.vx = Math.cos(this.angle) * currentSpeed;
         this.vy = Math.sin(this.angle) * currentSpeed;
         
-        // Calculate constant length based on baseSpeed so it doesn't shrink during slow-mo
-        this.length = this.baseSpeed * (Math.random() * 6 + 2);
+        // Tail length stays fixed — no recalculation per frame
         
         this.x += this.vx;
         this.y += this.vy;
@@ -623,10 +622,19 @@ class Laser {
     }
     draw() {
         if (!this.active) return;
+        // Draw tail using fixed length in the direction opposite to travel
+        const tailX = this.x - Math.cos(this.angle) * this.tailLength;
+        const tailY = this.y - Math.sin(this.angle) * this.tailLength;
+        
+        // Gradient from bright head to transparent tail
+        const grad = ctx.createLinearGradient(this.x, this.y, tailX, tailY);
+        grad.addColorStop(0, this.color);
+        grad.addColorStop(1, 'rgba(100, 180, 255, 0)');
+        
         ctx.beginPath();
         ctx.moveTo(this.x, this.y);
-        ctx.lineTo(this.x - this.vx * (this.length / this.speed), this.y - this.vy * (this.length / this.speed));
-        ctx.strokeStyle = this.color;
+        ctx.lineTo(tailX, tailY);
+        ctx.strokeStyle = grad;
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.stroke();

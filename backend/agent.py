@@ -31,9 +31,6 @@ from backend.errors import ClaudeAPIError
 from backend.utils import logger
 
 
-# Tool definitions removed in favor of explicit chaining workflow
-
-
 # =========================================================================
 # Tool Execution — MCP subprocess first, DuckDuckGo fallback
 # =========================================================================
@@ -97,8 +94,8 @@ def _search_academic_papers(query: str, num_results: int = 5) -> str:
         JSON string with list of {title, url, abstract, source} objects.
     """
     try:
-        # A simpler query that DuckDuckGo handles much better
-        academic_query: str = f"{query} research paper pdf arxiv OR google scholar"
+        # Simpler query format that DuckDuckGo handles reliably
+        academic_query: str = f"{query} research paper filetype:pdf arxiv scholar"
         with DDGS() as ddgs:
             raw_results: list[dict[str, str]] = list(
                 ddgs.text(academic_query, max_results=min(num_results, 10))
@@ -134,6 +131,62 @@ def _detect_source(url: str) -> str:
     return "Web"
 
 
+def _format_context(web_json: str, academic_json: str) -> str:
+    """
+    Convert raw JSON search results into clean readable text for the AI.
+
+    The AI often fails to parse raw JSON blobs correctly and misses URLs.
+    This function pre-processes both result sets into clearly labelled
+    plain text so the model can reliably reference every source URL.
+
+    Args:
+        web_json: JSON string from web search results.
+        academic_json: JSON string from academic paper search.
+
+    Returns:
+        A structured plain-text context block for the AI prompt.
+    """
+    sections: list[str] = []
+
+    # --- Web Results ---
+    try:
+        web_data: list[dict] = json.loads(web_json)
+        if web_data and not (len(web_data) == 1 and "error" in web_data[0]):
+            lines = ["=== WEB SEARCH RESULTS ==="]
+            for i, item in enumerate(web_data, 1):
+                title = item.get("title", "Untitled")
+                url = item.get("url", item.get("href", ""))
+                snippet = item.get("snippet", item.get("body", ""))
+                lines.append(f"[{i}] {title}")
+                lines.append(f"    URL: {url}")
+                lines.append(f"    Summary: {snippet[:300]}")
+                lines.append("")
+            sections.append("\n".join(lines))
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Could not parse web results JSON")
+
+    # --- Academic Papers ---
+    try:
+        academic_data: list[dict] = json.loads(academic_json)
+        if academic_data and not (len(academic_data) == 1 and "error" in academic_data[0]):
+            lines = ["=== ACADEMIC PAPERS ==="]
+            for i, item in enumerate(academic_data, 1):
+                title = item.get("title", "Untitled")
+                url = item.get("url", "")
+                abstract = item.get("abstract", "")
+                source = item.get("source", "Web")
+                lines.append(f"[{i}] {title} ({source})")
+                lines.append(f"    URL: {url}")
+                lines.append(f"    Abstract: {abstract[:300]}")
+                lines.append("")
+            sections.append("\n".join(lines))
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Could not parse academic results JSON")
+
+    if not sections:
+        return "No search results were available."
+
+    return "\n\n".join(sections)
 
 
 # =========================================================================
@@ -150,23 +203,31 @@ async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
     await asyncio.sleep(0.1)
 
     yield f"data: {json.dumps({'type': 'status', 'message': 'Searching the web and academic databases...'})}\n\n"
-    
+
     # Run the web search and academic search concurrently in thread pool
     web_results, academic_results = await asyncio.gather(
-        asyncio.to_thread(_execute_web_search, topic, 5),
-        asyncio.to_thread(_search_academic_papers, topic, 3)
+        asyncio.to_thread(_execute_web_search, topic, 6),
+        asyncio.to_thread(_search_academic_papers, topic, 4)
     )
     _extract_sources(web_results, sources)
     _extract_sources(academic_results, sources)
 
     yield f"data: {json.dumps({'type': 'status', 'message': 'Analyzing gathered information...'})}\n\n"
 
-    # Formulate the prompt with the gathered data
-    context = f"Web Search Results:\n{web_results}\n\nAcademic Papers:\n{academic_results}"
-    
+    # Pre-process JSON → clean readable text so the AI never misses a URL
+    context: str = _format_context(web_results, academic_results)
+
     base_messages = [
         {"role": "system", "content": RESEARCH_SYSTEM_PROMPT},
-        {"role": "user", "content": f"Research the following topic thoroughly: {topic}\n\nHere is the gathered context to base your research on:\n{context}"},
+        {
+            "role": "user",
+            "content": (
+                f"Research the following topic thoroughly: {topic}\n\n"
+                f"Use the search results below to write your summary. "
+                f"Every URL listed here MUST appear in your Sources section.\n\n"
+                f"{context}"
+            ),
+        },
     ]
 
     # Models chain list
@@ -191,25 +252,26 @@ async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
 
     for config in models_to_try:
         try:
-            logger.info(f"Trying {config['provider']} model: {config['model']}")
-            yield f"data: {json.dumps({'type': 'status', 'message': f'Generating summary using {config['provider']}...'})}\n\n"
+            provider_name = config['provider']
+            logger.info(f"Trying {provider_name} model: {config['model']}")
+            yield f"data: {json.dumps({'type': 'status', 'message': f'Generating summary using {provider_name}...'})}\n\n"
             stream = await config['client'].chat.completions.create(
                 model=config['model'],
                 messages=base_messages,
                 max_tokens=settings.max_tokens,
                 stream=True
             )
-            
+
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     text_chunk = chunk.choices[0].delta.content
                     yield f"data: {json.dumps({'type': 'content', 'text': text_chunk})}\n\n"
-            
+
             # End of stream
             logger.info(f"{config['provider']} model succeeded")
             yield f"data: {json.dumps({'type': 'done', 'sources': list(set(sources)), 'model': config['model'], 'topic': topic})}\n\n"
             return
-            
+
         except Exception as e:
             logger.warning(f"{config['provider']} model failed: {e}")
 
