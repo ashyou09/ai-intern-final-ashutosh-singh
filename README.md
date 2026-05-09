@@ -7,6 +7,7 @@
 ## Live Demo
 
 Run locally: `http://localhost:8000`
+Web: `https://ai-intern-final-ashutosh-singh.vercel.app/`
 
 ---
 
