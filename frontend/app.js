@@ -592,8 +592,8 @@ class Laser {
         this.vy = Math.sin(this.angle) * this.speed;
         
         // Fixed tail length — set once so it never jitters or shrinks
-        this.tailLength = this.baseSpeed * (Math.random() * 6 + 4);
-        this.color = `hsla(${Math.random() * 60 + 200}, 100%, 75%, 0.45)`; // Brighter opacity
+        this.tailLength = this.baseSpeed * (Math.random() * 20 + 15);
+        this.color = `hsla(${Math.random() * 60 + 200}, 100%, 85%, 0.9)`; // Brighter opacity and lightness
         this.active = true;
     }
     update() {
@@ -646,7 +646,7 @@ class Laser {
         ctx.moveTo(this.x, this.y);
         ctx.lineTo(tailX, tailY);
         ctx.strokeStyle = grad;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
         ctx.stroke();
     }
