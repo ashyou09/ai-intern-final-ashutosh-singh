@@ -150,7 +150,18 @@ researchBtn.addEventListener("click", async () => {
                             researchBtn.classList.remove("btn-loading");
                             mainLogo.classList.remove("logo-pulse");
                             
-                            // Remove typing cursor
+                            // Clean up AI-hallucinated empty sections before final render
+                            // The agent appends real sections with actual URLs at the end
+                            currentRawSummary = currentRawSummary.replace(
+                                /## (?:Related Research Papers|Sources)\n(?:(?!##)[\s\S])*?(?=\n## |\n*$)/g,
+                                (match) => {
+                                    // Keep the section if it has actual URLs, remove if it says "No" / "not provided"
+                                    if (/\bhttps?:\/\//.test(match)) return match;
+                                    return '';
+                                }
+                            );
+                            
+                            // Remove typing cursor and do final render
                             summaryContent.innerHTML = renderRichContent(currentRawSummary);
                             
                             // Render Math equations if MathJax is loaded
