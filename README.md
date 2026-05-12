@@ -12,6 +12,19 @@ Web: `https://ai-intern-final-ashutosh-singh.vercel.app/`
 
 ---
 
+## Visual Showcase
+
+<p align="center">
+  <img src="demonstration/home.png" width="45%" alt="Home Screen" />
+  <img src="demonstration/searching.png" width="45%" alt="Researching" />
+</p>
+<p align="center">
+  <img src="demonstration/results.png" width="45%" alt="Research Results" />
+  <img src="demonstration/pdf_preview.png" width="45%" alt="PDF Export" />
+</p>
+
+---
+
 ## Features
 
 - **Real-Time Streaming** — Results stream token-by-token directly to the browser via Server-Sent Events (SSE)
