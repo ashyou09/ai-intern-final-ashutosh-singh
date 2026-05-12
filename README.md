@@ -15,12 +15,12 @@ Web: `https://ai-intern-final-ashutosh-singh.vercel.app/`
 ## Visual Showcase
 
 <p align="center">
-  <img src="demonstration/home.png" width="45%" alt="Home Screen" />
-  <img src="demonstration/searching.png" width="45%" alt="Researching" />
+  <img src="demonstration/1. home.png" width="45%" alt="Home Screen" />
+  <img src="demonstration/2. searching.png" width="45%" alt="Researching" />
 </p>
 <p align="center">
-  <img src="demonstration/results.png" width="45%" alt="Research Results" />
-  <img src="demonstration/pdf_preview.png" width="45%" alt="PDF Export" />
+  <img src="demonstration/3. results.png" width="45%" alt="Research Results" />
+  <img src="demonstration/5. pdf_preview.png" width="45%" alt="PDF Export" />
 </p>
 
 ---
