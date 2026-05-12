@@ -112,7 +112,7 @@ def _clean_text(text: str) -> str:
     replacements: dict[str, str] = {
         "\u2018": "'", "\u2019": "'",
         "\u201c": '"', "\u201d": '"',
-        "\u2013": "-", "\u2014": "--",
+        "\u2013": " - ", "\u2014": " -- ",
         "\u2026": "...",
         "\u2022": "-",
         "\u00b7": "-",
@@ -136,8 +136,18 @@ def _clean_text(text: str) -> str:
     }
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
-    # Remove any remaining non-latin1 characters rather than replacing with '?'
-    return text.encode("latin-1", errors="ignore").decode("latin-1")
+    
+    # Replace non-latin1 characters with space to prevent word joining
+    # This fixes issues like 'mechanicssuperposition'
+    cleaned = []
+    for ch in text:
+        try:
+            ch.encode("latin-1")
+            cleaned.append(ch)
+        except UnicodeEncodeError:
+            cleaned.append(" ")
+    text = "".join(cleaned)
+    return re.sub(r' {2,}', ' ', text).strip()
 
 
 def _strip_markdown(text: str) -> str:
@@ -198,6 +208,41 @@ def export_pdf(content: str, filename: str) -> str:
     Returns:
         Absolute path to the generated .pdf file.
     """
+    def render_text_with_code(pdf, text, current_x=None, line_height=6):
+        if current_x is not None:
+            pdf.set_x(current_x)
+        
+        # Split by backticks first for code blocks
+        parts = re.split(r'(`[^`]+`)', text)
+        for part in parts:
+            if part.startswith("`") and part.endswith("`"):
+                pdf.set_font("Courier", "B", pdf.font_size_pt)
+                pdf.write(line_height, part[1:-1])
+                pdf.set_font("Helvetica", pdf.font_style, pdf.font_size_pt)
+            else:
+                # In non-code parts, look for links: [text](url)
+                # Enhanced regex to be more robust with parentheses in URLs
+                sub_parts = re.split(r'(\[[^\]]+\]\(https?://[^\s\)]+\))', part)
+                for sub in sub_parts:
+                    m_link = re.match(r'\[([^\]]+)\]\((https?://[^\s\)]+)\)', sub)
+                    if m_link:
+                        link_text = m_link.group(1)
+                        link_url = m_link.group(2)
+                        
+                        pdf.set_text_color(50, 80, 180) # Link blue
+                        pdf.set_font("Helvetica", "U", pdf.font_size_pt)
+                        
+                        # If link text is different from URL, show both for clarity
+                        display_text = link_text
+                        if link_text.strip() != link_url.strip() and not link_url.endswith(link_text):
+                            display_text = f"{link_text} ({link_url})"
+                        
+                        pdf.write(line_height, display_text, link_url)
+                        pdf.set_text_color(40, 40, 50) # Reset
+                        pdf.set_font("Helvetica", pdf.font_style, pdf.font_size_pt)
+                    else:
+                        pdf.write(line_height, sub)
+
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         safe_filename: str = _sanitize_filename(filename)
@@ -216,38 +261,57 @@ def export_pdf(content: str, filename: str) -> str:
         # ---- Extract a proper title from the AI content ----
         # Scan content for the first heading or the Overview paragraph
         title_text: str = ""
-        for cline in content.split("\n"):
+        title_line_index: int = -1
+        lines = content.split("\n")
+        for idx, cline in enumerate(lines):
             cline_s = cline.strip()
             # Use a top-level heading (#) as the title if one exists
             m_title = re.match(r'^#\s+(.+)$', cline_s)
             if m_title:
                 title_text = m_title.group(1)
+                title_line_index = idx
                 break
             # Otherwise grab the first ## heading text as the title
             m_h2 = re.match(r'^##\s+(.+)$', cline_s)
             if m_h2 and not title_text:
                 title_text = m_h2.group(1)
-                # Don't break — keep looking for a better # heading
+        # Don't break — keep looking for a better # heading
+        # If no heading found, use the first non-empty line as a candidate
+        if not title_text:
+            for cline in content.split("\n"):
+                if cline.strip() and not cline.strip().startswith("|"):
+                    title_text = cline.strip()[:60] # Truncate for "short" title
+                    break
         # Fallback: use the filename if no heading found in content
         if not title_text or title_text.lower() in ('overview', 'key findings', 'sources', 'important details', 'related research papers'):
             title_text = filename.replace("_", " ")
 
-        clean_title: str = _clean_text(_strip_markdown(title_text)).title()
-
         # ---- Styled Title Block ----
+        # Use a more sophisticated Title Case that doesn't capitalize small words
+        def proper_title_case(s):
+            small_words = {'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'with', 'in', 'of'}
+            words = s.split()
+            if not words: return ""
+            result = [words[0].capitalize()]
+            for word in words[1:]:
+                result.append(word.lower() if word.lower() in small_words else word.capitalize())
+            return " ".join(result)
+
+        clean_title: str = proper_title_case(_clean_text(_strip_markdown(title_text)))
+
         pdf.set_fill_color(30, 64, 136)  # Deep blue banner
         pdf.rect(0, 0, 210, 32, style='F')
-        pdf.set_font("Helvetica", "B", 16)
+        pdf.set_font("Helvetica", "B", 18)
         pdf.set_text_color(255, 255, 255)  # White on blue
-        pdf.set_y(8)
-        pdf.multi_cell(w=0, h=8, text=clean_title, align="C")
-        pdf.set_y(35)
+        pdf.set_y(10)
+        pdf.multi_cell(w=0, h=10, text=clean_title, align="C")
+        pdf.set_y(38)
 
-        # Thin accent line
+        # Thin accent line with more gap
         pdf.set_draw_color(70, 130, 180)
         pdf.set_line_width(0.6)
         pdf.line(left, pdf.get_y(), left + usable_w, pdf.get_y())
-        pdf.ln(6)
+        pdf.ln(10) # Even more gap before text starts
 
         # ---- Process content line by line ----
         pdf.set_text_color(30, 30, 40)
@@ -278,7 +342,7 @@ def export_pdf(content: str, filename: str) -> str:
         in_code_block: bool = False
         code_block_lines: list[str] = []
 
-        for line in content.split("\n"):
+        for i, line in enumerate(content.split("\n")):
             stripped: str = line.strip()
             
             # ---- Code block detection (``` ... ```) ----
@@ -350,38 +414,45 @@ def export_pdf(content: str, filename: str) -> str:
                 pdf.set_text_color(70, 130, 180)  # Steel blue
                 pdf.set_font("Helvetica", "B", 11)
                 pdf.set_x(left)
-                pdf.multi_cell(w=usable_w, h=7, text=clean)
+                render_text_with_code(pdf, clean)
                 pdf.set_text_color(40, 40, 50)  # Reset
                 pdf.set_font("Helvetica", size=10)
-                pdf.ln(2)
+                pdf.ln(5)
                 continue
 
             m_h2 = re.match(r"^#{2}\s*(.+)$", stripped)
             if m_h2:
                 clean = _clean_text(_strip_markdown(m_h2.group(1)))
-                pdf.ln(7)
+                pdf.ln(8) # Increased gap
                 pdf.set_fill_color(240, 245, 255)  # Very light blue background
                 pdf.set_text_color(30, 64, 136)  # Deep blue
                 pdf.set_font("Helvetica", "B", 13)
                 pdf.set_x(left)
-                pdf.multi_cell(w=usable_w, h=9, text=f"  {clean}", fill=True)
+                pdf.cell(w=usable_w, h=9, text="", fill=True) # Draw background
+                pdf.set_x(left + 2)
+                render_text_with_code(pdf, clean)
                 pdf.set_text_color(40, 40, 50)  # Reset
                 pdf.set_font("Helvetica", size=10)
-                pdf.ln(3)
+                pdf.ln(6)
                 continue
 
             m_h1 = re.match(r"^#\s*(.+)$", stripped)
             if m_h1:
+                # Skip if this was the line used for the banner title
+                if i == title_line_index:
+                    continue
                 clean = _clean_text(_strip_markdown(m_h1.group(1)))
                 pdf.ln(9)
                 pdf.set_fill_color(30, 64, 136)  # Deep blue background
                 pdf.set_text_color(255, 255, 255)  # White text
                 pdf.set_font("Helvetica", "B", 14)
                 pdf.set_x(left)
-                pdf.multi_cell(w=usable_w, h=10, text=f"  {clean}", fill=True)
+                pdf.cell(w=usable_w, h=10, text="", fill=True) # Draw background
+                pdf.set_x(left + 2)
+                render_text_with_code(pdf, clean)
                 pdf.set_text_color(40, 40, 50)  # Reset
                 pdf.set_font("Helvetica", size=10)
-                pdf.ln(4)
+                pdf.ln(6)
                 continue
 
             # Horizontal rule
@@ -426,8 +497,9 @@ def export_pdf(content: str, filename: str) -> str:
                     clean = _clean_text(bullet_content)
                     pdf.set_font("Helvetica", size=10)
                     pdf.set_x(left + 8)
-                    pdf.multi_cell(w=usable_w - 12, h=6, text=f"-  {clean}", markdown=True, align="L")
-                pdf.ln(1.5)
+                    pdf.write(6, "-  ")
+                    render_text_with_code(pdf, clean)
+                pdf.ln(7)
                 continue
 
             # Numbered list items — use wider indent
@@ -465,40 +537,11 @@ def export_pdf(content: str, filename: str) -> str:
                 pdf.set_font("Helvetica", size=10)
                 continue
 
-            # Regular paragraph text — check for inline links first
-            link_matches = list(re.finditer(r'\[([^\]]+)\]\((https?://[^)]+)\)', stripped))
-            if link_matches:
-                # Render paragraph with clickable links
-                last_end = 0
-                for lm in link_matches:
-                    before = stripped[last_end:lm.start()]
-                    if before:
-                        clean_before = _clean_text(before)
-                        pdf.set_font("Helvetica", size=10)
-                        pdf.set_text_color(40, 40, 50)
-                        pdf.write(6, clean_before)
-                    link_text = _clean_text(lm.group(1))
-                    link_url = lm.group(2)
-                    pdf.set_font("Helvetica", "U", 10)
-                    pdf.set_text_color(50, 80, 180)
-                    pdf.write(6, link_text, link_url)
-                    last_end = lm.end()
-                after = stripped[last_end:]
-                if after:
-                    clean_after = _clean_text(after)
-                    pdf.set_font("Helvetica", size=10)
-                    pdf.set_text_color(40, 40, 50)
-                    pdf.write(6, clean_after)
-                pdf.ln(7)
-                pdf.set_text_color(40, 40, 50)
-                pdf.set_font("Helvetica", size=10)
             else:
                 clean = _clean_text(stripped)
-                pdf.set_font("Helvetica", size=10)
-                pdf.set_text_color(40, 40, 50)
-                pdf.set_x(left)
-                pdf.multi_cell(w=usable_w, h=6, text=clean, markdown=True, align="L")
-            pdf.ln(2)
+                render_text_with_code(pdf, clean, current_x=left)
+                pdf.ln(7)
+            pdf.ln(1)
 
         flush_table()
 

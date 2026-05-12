@@ -9,7 +9,9 @@ Each entry includes a TITLE, a URL, and a SUMMARY/ABSTRACT.
 
 Synthesize ALL the provided information into a clear, structured research summary.
 
-Format your output with EXACTLY these sections (and NO other sections):
+Format your output with EXACTLY these sections:
+
+# [A short, professional title for the research]
 
 ## Overview
 A concise 2-3 sentence introduction to the topic.
