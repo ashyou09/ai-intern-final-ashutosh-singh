@@ -18,9 +18,9 @@ Web: `https://ai-intern-final-ashutosh-singh.vercel.app/`
 - **MCP Tool Integration** — Web search is executed via a Model Context Protocol (MCP) server subprocess, with automatic DuckDuckGo fallback
 - **Dual AI Model Chain** — Tries OpenRouter (GPT) first, then falls back to Groq (LLaMA 70B → LLaMA 8B) automatically
 - **Academic Paper Search** — Searches arXiv, PubMed, Semantic Scholar, and Google Scholar in parallel with web search
-- **PDF Export Engine** — Generates styled PDFs with blue title banners, section headers, code-block math rendering, and clickable links
-- **TXT Export** — Clean plain-text export of all research output
-- **Math Rendering** — Formulas displayed in styled code blocks (frontend) and monospace Courier boxes (PDF)
+- **PDF Export Engine** — Generates high-fidelity reports with professional title banners, intelligent title casing (preserving small words like "in" and "with"), visible clickable links, and proper Unicode spacing (no joined characters).
+- **TXT Export** — Clean plain-text export of all research output.
+- **Math Rendering** — Formulas displayed in styled code blocks (frontend) and monospace Courier syntax in PDFs for technical accuracy.
 - **Responsive UI** — Dark-mode glassmorphism UI with animated loading states and step-by-step progress indicators
 
 ---
