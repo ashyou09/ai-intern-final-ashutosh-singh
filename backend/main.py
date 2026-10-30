@@ -1,52 +1,47 @@
 """
-FastAPI application entry point — CORS, exception handlers, router.
+FastAPI application entry point — CORS, exception handlers, router, static files.
 This file is the entry point ONLY. No business logic here.
+
+Run locally:  uvicorn backend.main:app --reload
 """
 
+import os
+
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routes import router
 from backend.config import settings
 from backend.errors import (
-    EmptyTopicError,
-    TopicTooLongError,
-    ClaudeAPIError,
-    MCPConnectionError,
     ExportError,
-    empty_topic_handler,
-    topic_too_long_handler,
-    claude_api_handler,
-    mcp_connection_handler,
     export_error_handler,
     generic_error_handler,
+    validation_error_handler,
 )
+from backend.routes import router
+
+FRONTEND_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 
 app = FastAPI(
     title="AI Research Assistant",
-    description="Claude-powered research agent with MCP tool integration",
-    version="1.0.0",
+    description="AI research agent with MCP web search, academic paper search and PDF export",
+    version="1.1.0",
 )
 
-# CORS — allow frontend to call the backend
+# CORS — configure CORS_ORIGINS in .env to restrict in production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origin_list,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
-# Register custom exception handlers
-app.add_exception_handler(EmptyTopicError, empty_topic_handler)
-app.add_exception_handler(TopicTooLongError, topic_too_long_handler)
-app.add_exception_handler(ClaudeAPIError, claude_api_handler)
-app.add_exception_handler(MCPConnectionError, mcp_connection_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.add_exception_handler(ExportError, export_error_handler)
 app.add_exception_handler(Exception, generic_error_handler)
 
-# Include API routes
 app.include_router(router)
 
-# Serve frontend static files from the same server
-app.mount("/", StaticFiles(directory="frontend", html=True), name="static")
+# Serve the frontend from the same server (mounted last so API routes win)
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="static")

@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     fallback_model: str = "llama-3.3-70b-versatile"
     fallback_model_2: str = "llama-3.1-8b-instant"
     max_tokens: int = 2000
-    output_dir: str = "./outputs"
 
     # Search
     web_results: int = 6

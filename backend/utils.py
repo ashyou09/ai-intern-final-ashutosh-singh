@@ -1,11 +1,12 @@
 """
-Utility functions — Pydantic request models, input validators, text helpers, and logging.
+Utility module — logging setup and Pydantic request models with validators.
 """
 
-import re
 import logging
-from pydantic import BaseModel, field_validator
+import re
 from typing import Literal
+
+from pydantic import BaseModel, field_validator
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -14,8 +15,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ai_research_assistant")
 
+MAX_TOPIC_LENGTH: int = 500
+MAX_EXPORT_CHARS: int = 200_000
 
-# --- Pydantic request/response models ---
+
+# --- Pydantic request models ---
 
 class ResearchRequest(BaseModel):
     """Request body for POST /research."""
@@ -23,13 +27,13 @@ class ResearchRequest(BaseModel):
 
     @field_validator("topic")
     @classmethod
-    def topic_must_not_be_empty(cls, v: str) -> str:
-        """Validate that the topic is not empty or whitespace-only."""
+    def topic_must_be_valid(cls, v: str) -> str:
+        """Validate that the topic is non-empty and within the length limit."""
         stripped = v.strip()
         if not stripped:
             raise ValueError("Topic cannot be empty.")
-        if len(stripped) > 500:
-            raise ValueError("Topic must be 500 characters or fewer.")
+        if len(stripped) > MAX_TOPIC_LENGTH:
+            raise ValueError(f"Topic must be {MAX_TOPIC_LENGTH} characters or fewer.")
         return stripped
 
 
@@ -41,33 +45,18 @@ class ExportRequest(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def content_must_not_be_empty(cls, v: str) -> str:
-        """Validate that export content is not empty."""
+    def content_must_be_valid(cls, v: str) -> str:
+        """Validate that export content is non-empty and not oversized."""
         if not v.strip():
             raise ValueError("Content cannot be empty.")
+        if len(v) > MAX_EXPORT_CHARS:
+            raise ValueError("Content is too large to export.")
         return v
 
     @field_validator("filename")
     @classmethod
     def sanitize_filename(cls, v: str) -> str:
-        """Strip special characters from the filename to prevent path traversal."""
-        sanitized = re.sub(r"[^\w\s-]", "", v.strip())
+        """Strip special characters from the filename (no path traversal, no header injection)."""
+        sanitized = re.sub(r"[^\w\s-]", "", v.strip(), flags=re.ASCII)
         sanitized = re.sub(r"\s+", "_", sanitized)
         return sanitized[:100] if sanitized else "research_output"
-
-
-class ResearchResponse(BaseModel):
-    """Response body for POST /research."""
-    summary: str
-    sources: list[str]
-    topic: str
-    model_used: str = ""
-
-
-# --- Text helpers ---
-
-def truncate_text(text: str, max_length: int = 500) -> str:
-    """Truncate text to a maximum length with an ellipsis."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
