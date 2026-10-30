@@ -3,9 +3,9 @@
  * Handles API calls, result rendering, rich text formatting, and file export.
  */
 
-const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-    ? "http://localhost:8000"
-    : "";
+// The backend serves this page, so API calls are same-origin. When the HTML
+// file is opened directly from disk, fall back to the default local server.
+const API_BASE = window.location.protocol === "file:" ? "http://localhost:8000" : "";
 
 // --- DOM Elements ---
 const topicInput = document.getElementById("topic-input");
@@ -18,11 +18,10 @@ const errorDismiss = document.getElementById("error-dismiss");
 const resultsSection = document.getElementById("results");
 const summaryContent = document.getElementById("summary-content");
 const resultsTopic = document.getElementById("results-topic");
-const sourcesSection = document.getElementById("sources-section");
-const sourcesList = document.getElementById("sources-list");
 const exportTxtBtn = document.getElementById("export-txt");
 const exportPdfBtn = document.getElementById("export-pdf");
 const newResearchBtn = document.getElementById("new-research-btn");
+const stopBtn = document.getElementById("stop-btn");
 const mainLogo = document.getElementById("main-logo");
 
 // Loading step elements
@@ -34,7 +33,7 @@ const stepWrite = document.getElementById("step-write");
 let currentTopic = "";
 let currentRawSummary = "";
 let currentSources = [];
-let loadingInterval = null;
+let abortController = null;
 
 // --- Character Counter ---
 topicInput.addEventListener("input", () => {
@@ -65,164 +64,173 @@ researchBtn.addEventListener("click", async () => {
     }
 
     currentTopic = topic;
+    currentRawSummary = "";
+    currentSources = [];
     showLoading(true);
     hideError();
     hideResults();
-    researchBtn.disabled = true;
+    setBusy(true);
+
+    abortController = new AbortController();
 
     try {
         const res = await fetch(`${API_BASE}/research`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ topic }),
+            signal: abortController.signal,
         });
 
         if (!res.ok) {
-            let errMessage = "Research failed. Please try again.";
-            try {
-                const errData = await res.json();
-                errMessage = errData.error || errData.detail || errMessage;
-            } catch (_) {}
-            throw new Error(errMessage);
+            throw new Error(await readErrorMessage(res, "Research failed. Please try again."));
         }
 
-        // Setup streaming state (but keep loading section visible initially)
         resultsTopic.textContent = currentTopic;
         summaryContent.innerHTML = '<span class="typing-cursor"></span>';
-        sourcesSection.classList.add("hidden");
-        // Reset UI
-        researchBtn.disabled = true;
-        researchBtn.classList.add("btn-loading");
-        mainLogo.classList.add("logo-pulse");
         exportPdfBtn.disabled = true;
-        
-        currentRawSummary = "";
-        currentSources = [];
-        let hasStartedContent = false;
+        exportTxtBtn.disabled = true;
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            
-            // Parse SSE chunks separated by double newline
-            const lines = buffer.split("\n\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                    try {
-                        const payload = JSON.parse(line.substring(6));
-                        
-                        if (payload.type === "status") {
-                            // Sync backend status to frontend visual steps
-                            if (payload.message.includes("Analyzing")) {
-                                stepSearch.classList.remove("active");
-                                stepSearch.classList.add("done");
-                                stepAnalyze.classList.add("active");
-                            } else if (payload.message.includes("Generating")) {
-                                stepAnalyze.classList.remove("active");
-                                stepAnalyze.classList.add("done");
-                                stepWrite.classList.add("active");
-                            }
-                        } else if (payload.type === "content") {
-                            if (!hasStartedContent) {
-                                hasStartedContent = true;
-                                // Hide loading steps and show text streaming now
-                                loadingSection.classList.add("hidden");
-                                resultsSection.classList.remove("hidden");
-                            }
-                            currentRawSummary += payload.text;
-                            // Re-parse and render current markdown progressively
-                            summaryContent.innerHTML = renderRichContent(currentRawSummary) + '<span class="typing-cursor"></span>';
-                        } else if (payload.type === "done") {
-                            loadingSection.classList.add("hidden");
-                            resultsSection.classList.remove("hidden");
-                            
-                            // Finish and show sources
-                            currentSources = payload.sources || [];
-                            renderSources(currentSources);
-                            exportPdfBtn.disabled = false;
-                            exportTxtBtn.disabled = false;
-                            researchBtn.classList.remove("btn-loading");
-                            mainLogo.classList.remove("logo-pulse");
-                            
-                            // Clean up AI-hallucinated empty sections before final render
-                            // The agent appends real sections with actual URLs at the end
-                            currentRawSummary = currentRawSummary.replace(
-                                /## (?:Related Research Papers|Sources)\n(?:(?!##)[\s\S])*?(?=\n## |\n*$)/g,
-                                (match) => {
-                                    // Keep the section if it has actual URLs, remove if it says "No" / "not provided"
-                                    if (/\bhttps?:\/\//.test(match)) return match;
-                                    return '';
-                                }
-                            );
-                            
-                            // Remove typing cursor and do final render
-                            summaryContent.innerHTML = renderRichContent(currentRawSummary);
-                            
-                            // Render Math equations if MathJax is loaded
-                            if (window.MathJax) {
-                                MathJax.typesetClear([summaryContent]);
-                                MathJax.typesetPromise([summaryContent]).catch((err) => console.log('MathJax error:', err));
-                            }
-                        } else if (payload.type === "error") {
-                            throw new Error(payload.message);
-                        }
-                    } catch (e) {
-                        if (e.message !== "Unexpected end of JSON input") {
-                            console.error("Error parsing stream chunk", e, line);
-                        }
-                    }
-                }
-            }
-        }
+        await readEventStream(res, handleStreamEvent);
 
     } catch (err) {
-        showError(err.message || "Failed to connect to the server.");
-        researchBtn.disabled = false;
-        researchBtn.classList.remove("btn-loading");
-        mainLogo.classList.remove("logo-pulse");
+        if (err.name === "AbortError") {
+            // User pressed Stop — keep whatever was generated so far
+            if (currentRawSummary) finishRender();
+        } else {
+            showError(err.message || "Failed to connect to the server.");
+        }
     } finally {
+        abortController = null;
         showLoading(false);
-        researchBtn.disabled = false;
-        researchBtn.classList.remove("btn-loading");
-        mainLogo.classList.remove("logo-pulse");
+        setBusy(false);
     }
 });
 
-function renderSources(sources) {
-    if (sources && sources.length > 0) {
-        sourcesList.innerHTML = "";
-        sources.forEach((url) => {
-            const li = document.createElement("li");
-            const a = document.createElement("a");
-            a.href = url;
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            try {
-                const u = new URL(url);
-                a.textContent = u.hostname + u.pathname.slice(0, 40);
-            } catch {
-                a.textContent = url;
-            }
-            li.appendChild(a);
-            sourcesList.appendChild(li);
-        });
-        sourcesSection.classList.remove("hidden");
-    } else {
-        sourcesSection.classList.add("hidden");
-    }
+stopBtn.addEventListener("click", () => {
+    if (abortController) abortController.abort();
+});
 
-    // Smooth scroll to results
-    setTimeout(() => {
-        resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 100);
+/** Read an SSE response body and call onEvent(payload) for every `data:` event. */
+async function readEventStream(res, onEvent) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const event of events) {
+            if (!event.startsWith("data: ")) continue;
+            let payload;
+            try {
+                payload = JSON.parse(event.substring(6));
+            } catch (e) {
+                console.error("Could not parse stream event", e, event);
+                continue;
+            }
+            onEvent(payload); // may throw (e.g. server-side error) — propagates to caller
+        }
+    }
+}
+
+function handleStreamEvent(payload) {
+    switch (payload.type) {
+        case "status":
+            setStage(payload.stage);
+            break;
+
+        case "content":
+            if (resultsSection.classList.contains("hidden")) {
+                loadingSection.classList.add("hidden");
+                resultsSection.classList.remove("hidden");
+            }
+            currentRawSummary += payload.text;
+            summaryContent.innerHTML = renderRichContent(currentRawSummary) + '<span class="typing-cursor"></span>';
+            break;
+
+        case "reset":
+            // A model failed mid-answer; the server is retrying with a fallback model
+            currentRawSummary = "";
+            summaryContent.innerHTML = '<span class="typing-cursor"></span>';
+            break;
+
+        case "done":
+            currentSources = payload.sources || [];
+            finishRender();
+            setTimeout(() => {
+                resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 100);
+            break;
+
+        case "error":
+            throw new Error(payload.message || "Research failed.");
+    }
+}
+
+/** Final render: remove the cursor, enable export, typeset math. */
+function finishRender() {
+    loadingSection.classList.add("hidden");
+    resultsSection.classList.remove("hidden");
+    summaryContent.innerHTML = renderRichContent(currentRawSummary);
+    exportPdfBtn.disabled = false;
+    exportTxtBtn.disabled = false;
+
+    if (window.MathJax && MathJax.typesetPromise) {
+        MathJax.typesetClear([summaryContent]);
+        MathJax.typesetPromise([summaryContent]).catch((err) => console.log("MathJax error:", err));
+    }
+}
+
+function setBusy(busy) {
+    researchBtn.disabled = busy;
+    researchBtn.classList.toggle("btn-loading", busy);
+    mainLogo.classList.toggle("logo-pulse", busy);
+    stopBtn.classList.toggle("hidden", !busy);
+}
+
+function setStage(stage) {
+    const order = [stepSearch, stepAnalyze, stepWrite];
+    const index = { search: 0, analyze: 1, write: 2 }[stage];
+    if (index === undefined) return;
+    order.forEach((step, i) => {
+        step.classList.toggle("done", i < index);
+        step.classList.toggle("active", i === index);
+    });
+}
+
+async function readErrorMessage(res, fallback) {
+    try {
+        const data = await res.json();
+        if (typeof data.error === "string") return data.error;
+        if (typeof data.detail === "string") return data.detail;
+    } catch (_) {}
+    return fallback;
+}
+
+// =========================================================================
+// HTML safety helpers — everything rendered comes from the AI or from
+// third-party web pages, so it must be escaped before going into innerHTML.
+// =========================================================================
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function isSafeUrl(url) {
+    return /^https?:\/\//i.test(url);
+}
+
+function linkHtml(url, label) {
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="rc-link">${label}</a>`;
 }
 
 // =========================================================================
@@ -237,7 +245,8 @@ function renderRichContent(text) {
     // Split into lines for block-level processing
     const lines = text.split("\n");
     let html = "";
-    let inList = false;
+    let inList = false;      // false | "ul" | "ol"
+    let inSources = false;   // inside the "## Sources" section → list items get #ref-N anchors
     let inTable = false;
     let tableRows = [];
     
@@ -262,7 +271,7 @@ function renderRichContent(text) {
                 html += `<pre class="rc-codeblock"><code>${codeContent}</code></pre>`;
                 codeBlockLines = [];
             } else {
-                if (inList) { html += "</ul>"; inList = false; }
+                if (inList) { html += `</${inList}>`; inList = false; }
                 inCodeBlock = true;
                 codeBlockLines = [];
             }
@@ -285,7 +294,7 @@ function renderRichContent(text) {
             mathLines.push(line);
             if (trimmed === "\\]" || trimmed === "$$") {
                 inMath = false;
-                html += `<div class="rc-math" style="overflow-x:auto; margin: 1rem 0;">${mathLines.join('\n')}</div>`;
+                html += `<div class="rc-math" style="overflow-x:auto; margin: 1rem 0;">${escapeHtml(mathLines.join('\n'))}</div>`;
                 mathLines = [];
             }
             continue;
@@ -293,7 +302,7 @@ function renderRichContent(text) {
 
         // Empty line
         if (!trimmed) {
-            if (inList) { html += "</ul>"; inList = false; }
+            if (inList) { html += `</${inList}>`; inList = false; }
             if (inTable) { html += renderTable(tableRows); inTable = false; tableRows = []; }
             continue;
         }
@@ -316,47 +325,52 @@ function renderRichContent(text) {
 
         // Headers
         if (trimmed.startsWith("### ")) {
-            if (inList) { html += "</ul>"; inList = false; }
+            if (inList) { html += `</${inList}>`; inList = false; }
             html += `<h4 class="rc-h3">${inlineFormat(trimmed.slice(4))}</h4>`;
             continue;
         }
         if (trimmed.startsWith("## ")) {
-            if (inList) { html += "</ul>"; inList = false; }
+            if (inList) { html += `</${inList}>`; inList = false; }
+            inSources = /^sources$/i.test(trimmed.slice(3).trim());
             html += `<h3 class="rc-h2">${inlineFormat(trimmed.slice(3))}</h3>`;
             continue;
         }
         if (trimmed.startsWith("# ")) {
-            if (inList) { html += "</ul>"; inList = false; }
+            if (inList) { html += `</${inList}>`; inList = false; }
             html += `<h2 class="rc-h1">${inlineFormat(trimmed.slice(2))}</h2>`;
             continue;
         }
 
         // Horizontal rule
         if (/^-{3,}$/.test(trimmed) || /^\*{3,}$/.test(trimmed)) {
-            if (inList) { html += "</ul>"; inList = false; }
+            if (inList) { html += `</${inList}>`; inList = false; }
             html += "<hr class='rc-hr'>";
             continue;
         }
 
         // Bullet list items
         if (/^\s*[-*•]\s+/.test(line)) {
-            if (!inList) { html += '<ul class="rc-list">'; inList = true; }
+            if (inList === "ol") { html += "</ol>"; inList = false; }
+            if (!inList) { html += '<ul class="rc-list">'; inList = "ul"; }
             const content = line.replace(/^\s*[-*•]\s+/, "");
             html += `<li>${inlineFormat(content)}</li>`;
             continue;
         }
 
         // Numbered list items
-        if (/^\s*\d+\.\s+/.test(line)) {
-            if (!inList) { html += '<ol class="rc-list rc-ol">'; inList = true; }
-            const content = line.replace(/^\s*\d+\.\s+/, "");
-            html += `<li>${inlineFormat(content)}</li>`;
+        const numMatch = line.match(/^\s*(\d+)\.\s+(.*)$/);
+        if (numMatch) {
+            if (inList === "ul") { html += "</ul>"; inList = false; }
+            if (!inList) { html += '<ol class="rc-list rc-ol">'; inList = "ol"; }
+            const n = numMatch[1];
+            const anchor = inSources ? ` id="ref-${n}"` : "";
+            html += `<li value="${n}"${anchor}>${inlineFormat(numMatch[2])}</li>`;
             continue;
         }
 
         // Close list if we hit a non-list line
         if (inList) {
-            html += inList ? "</ul>" : "</ol>";
+            html += `</${inList}>`;
             inList = false;
         }
 
@@ -371,7 +385,7 @@ function renderRichContent(text) {
     }
 
     // Close any open lists/tables
-    if (inList) html += "</ul>";
+    if (inList) html += `</${inList}>`;
     if (inTable) html += renderTable(tableRows);
 
     return html;
@@ -379,27 +393,39 @@ function renderRichContent(text) {
 
 // --- Inline formatting (bold, italic, links, code) ---
 function inlineFormat(text) {
-    return text
-        // Links [text](url)
-        .replace(
-            /\[([^\]]+)\]\(([^)]+)\)/g,
-            '<a href="$2" target="_blank" rel="noopener noreferrer" class="rc-link">$1</a>'
-        )
-        // Bare URLs not already inside HTML or markdown links
-        .replace(
-            /(?<!href="|\]\()(https?:\/\/[^\s<)]+)/g, 
-            '<a href="$1" target="_blank" rel="noopener noreferrer" class="rc-link">$1</a>'
-        )
+    // Pieces that must not be touched by later steps (code, links, citations)
+    // are stashed and replaced with placeholders, then restored at the end.
+    const stash = [];
+    const keep = (html) => `\u0000${stash.push(html) - 1}\u0000`;
+
+    let s = text
+        // Inline code `text`
+        .replace(/`([^`]+)`/g, (_, code) => keep(`<code class="rc-code">${escapeHtml(code)}</code>`))
+        // Links [text](url) — only http(s) URLs become links
+        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) =>
+            isSafeUrl(url) ? keep(linkHtml(url, escapeHtml(label))) : m)
+        // Bare URLs
+        .replace(/https?:\/\/[^\s<>"'()\]]+/g, (url) => {
+            const trail = url.match(/[.,;:!?]+$/);
+            const clean = trail ? url.slice(0, -trail[0].length) : url;
+            return keep(linkHtml(clean, escapeHtml(clean))) + (trail ? trail[0] : "");
+        })
+        // Citations [1] or [1, 3] → superscript links to the Sources list
+        .replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, (_, nums) => keep(
+            nums.split(/\s*,\s*/)
+                .map((n) => `<sup class="rc-ref"><a href="#ref-${n}">[${n}]</a></sup>`)
+                .join("")
+        ));
+
+    s = escapeHtml(s)
         // Bold **text** or __text__
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/__([^_]+)__/g, "<strong>$1</strong>")
         // Italic *text* or _text_
         .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-        .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "<em>$1</em>")
-        // Inline code `text`
-        .replace(/`([^`]+)`/g, '<code class="rc-code">$1</code>')
-        // Superscript markers like [1], [2] etc
-        .replace(/\[(\d+)\]/g, '<sup class="rc-ref">[$1]</sup>');
+        .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "<em>$1</em>");
+
+    return s.replace(/\u0000(\d+)\u0000/g, (_, i) => stash[Number(i)]);
 }
 
 // --- Table renderer ---
@@ -426,20 +452,12 @@ async function exportAs(format) {
     const rawTopic = currentTopic || "research_output";
     const filename = rawTopic.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-    // For TXT: send raw markdown text. For PDF: send raw text (backend handles formatting)
-    let content = currentRawSummary;
+    // Send the raw markdown (it already contains the numbered Sources section)
+    const content = currentRawSummary;
 
     if (!content.trim()) {
         showError("No content to export.");
         return;
-    }
-
-    // Append sources to the exported file
-    if (currentSources && currentSources.length > 0) {
-        content += "\n\n## Sources\n";
-        currentSources.forEach(src => {
-            content += `- [${src}](${src})\n`;
-        });
     }
 
     try {
@@ -450,12 +468,7 @@ async function exportAs(format) {
         });
 
         if (!res.ok) {
-            let errMessage = "Export failed.";
-            try {
-                const errData = await res.json();
-                errMessage = errData.error || errData.detail || errMessage;
-            } catch (_) {}
-            showError(errMessage);
+            showError(await readErrorMessage(res, "Export failed."));
             return;
         }
 
@@ -486,8 +499,7 @@ newResearchBtn.addEventListener("click", () => {
     currentRawSummary = "";
     currentSources = [];
     topicInput.focus();
-    researchBtn.classList.remove("btn-loading");
-    researchBtn.disabled = false;
+    setBusy(false);
 
     document.getElementById("search-section").scrollIntoView({
         behavior: "smooth",
@@ -505,7 +517,6 @@ function showLoading(state) {
         startLoadingSteps();
     } else {
         loadingSection.classList.add("hidden");
-        stopLoadingSteps();
     }
 }
 
@@ -528,17 +539,8 @@ function startLoadingSteps() {
     [stepSearch, stepAnalyze, stepWrite].forEach((s) => {
         s.classList.remove("active", "done");
     });
-    // Start at search phase
+    // Steps advance as the backend sends `status` events (see setStage)
     stepSearch.classList.add("active");
-    
-    // Animation is now driven manually by SSE backend events instead of interval
-}
-
-function stopLoadingSteps() {
-    if (loadingInterval) {
-        clearInterval(loadingInterval);
-        loadingInterval = null;
-    }
 }
 
 // --- Background Laser & Particle Effects ---
