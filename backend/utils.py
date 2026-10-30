@@ -44,7 +44,7 @@ class ExportRequest(BaseModel):
     """Request body for POST /export."""
     content: str
     filename: str
-    format: Literal["txt", "pdf"]
+    format: Literal["txt", "md", "pdf"]
 
     @field_validator("content")
     @classmethod

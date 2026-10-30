@@ -8,14 +8,18 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import Response, StreamingResponse
 
 from backend.agent import get_model_chain, run_research_workflow
-from backend.exporter import export_pdf, export_txt
+from backend.exporter import export_md, export_pdf, export_txt
 from backend.providers import PROVIDERS
 from backend.ratelimit import research_rate_limit
 from backend.utils import ExportRequest, ResearchRequest, logger
 
 router = APIRouter()
 
-_MEDIA_TYPES: dict[str, str] = {"txt": "text/plain; charset=utf-8", "pdf": "application/pdf"}
+_EXPORTERS = {
+    "txt": (export_txt, "text/plain; charset=utf-8"),
+    "md": (export_md, "text/markdown; charset=utf-8"),
+    "pdf": (export_pdf, "application/pdf"),
+}
 
 
 @router.get("/health")
@@ -46,15 +50,15 @@ async def research(request: ResearchRequest) -> StreamingResponse:
 
 @router.post("/export")
 async def export(request: ExportRequest) -> Response:
-    """Export research content as a downloadable .txt or .pdf file."""
+    """Export research content as a downloadable .txt, .md or .pdf file."""
     logger.info(f"Export request: format={request.format}, filename={request.filename}")
 
-    exporter = export_pdf if request.format == "pdf" else export_txt
+    exporter, media_type = _EXPORTERS[request.format]
     data: bytes = exporter(request.content, request.filename)
     download_name: str = f"{request.filename}.{request.format}"
 
     return Response(
         content=data,
-        media_type=_MEDIA_TYPES[request.format],
+        media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
     )

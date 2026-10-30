@@ -20,6 +20,9 @@ const summaryContent = document.getElementById("summary-content");
 const resultsTopic = document.getElementById("results-topic");
 const exportTxtBtn = document.getElementById("export-txt");
 const exportPdfBtn = document.getElementById("export-pdf");
+const exportMdBtn = document.getElementById("export-md");
+const copyBtn = document.getElementById("copy-btn");
+const copyLabel = document.getElementById("copy-label");
 const newResearchBtn = document.getElementById("new-research-btn");
 const stopBtn = document.getElementById("stop-btn");
 const mainLogo = document.getElementById("main-logo");
@@ -250,8 +253,7 @@ researchBtn.addEventListener("click", async () => {
 
         resultsTopic.textContent = currentTopic;
         summaryContent.innerHTML = '<span class="typing-cursor"></span>';
-        exportPdfBtn.disabled = true;
-        exportTxtBtn.disabled = true;
+        setExportEnabled(false);
 
         await readEventStream(res, handleStreamEvent);
 
@@ -349,13 +351,16 @@ function finishRender() {
     loadingSection.classList.add("hidden");
     resultsSection.classList.remove("hidden");
     summaryContent.innerHTML = renderRichContent(currentRawSummary);
-    exportPdfBtn.disabled = false;
-    exportTxtBtn.disabled = false;
+    setExportEnabled(true);
 
     if (window.MathJax && MathJax.typesetPromise) {
         MathJax.typesetClear([summaryContent]);
         MathJax.typesetPromise([summaryContent]).catch((err) => console.log("MathJax error:", err));
     }
+}
+
+function setExportEnabled(enabled) {
+    [exportPdfBtn, exportTxtBtn, exportMdBtn, copyBtn].forEach((btn) => { btn.disabled = !enabled; });
 }
 
 function setBusy(busy) {
@@ -671,6 +676,18 @@ async function exportAs(format) {
 }
 
 exportTxtBtn.addEventListener("click", () => exportAs("txt"));
+exportMdBtn.addEventListener("click", () => exportAs("md"));
+
+copyBtn.addEventListener("click", async () => {
+    if (!currentRawSummary.trim()) return;
+    try {
+        await navigator.clipboard.writeText(currentRawSummary);
+        copyLabel.textContent = "Copied!";
+    } catch (_) {
+        copyLabel.textContent = "Copy failed";
+    }
+    setTimeout(() => { copyLabel.textContent = "Copy"; }, 1800);
+});
 exportPdfBtn.addEventListener("click", () => exportAs("pdf"));
 
 // --- New Research ---

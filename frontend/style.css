@@ -672,6 +672,7 @@ select.field-input option { background: #141627; }
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+    flex-wrap: wrap;
 }
 
 /* =========================================================================
@@ -972,7 +973,7 @@ select.field-input option { background: #141627; }
     .btn-primary { justify-content: center; }
     .results-header { flex-direction: column; }
     .export-controls { width: 100%; }
-    .export-controls .btn { flex: 1; }
+    .export-controls .btn { flex: 1 1 calc(50% - 4px); padding: 10px 12px; }
     .orb-1 { width: 300px; height: 300px; }
     .orb-2 { width: 250px; height: 250px; }
     .orb-3 { width: 200px; height: 200px; }
