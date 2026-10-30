@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     web_results: int = 6
     paper_results: int = 4
     snippet_chars: int = 400
+    pages_to_read: int = 3        # top web results whose full text is fetched (0 = off)
+    page_chars: int = 2500        # max characters of text kept per page
+    page_timeout: float = 8.0
     http_timeout: float = 15.0
     mcp_timeout: int = 30
 

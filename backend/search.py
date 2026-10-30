@@ -26,6 +26,7 @@ from ddgs import DDGS
 
 from backend.config import settings
 from backend.mcp_client import call_tool_subprocess
+from backend.pages import read_top_pages
 from backend.utils import logger
 
 ARXIV_API_URL: str = "https://export.arxiv.org/api/query"
@@ -45,9 +46,14 @@ class Source:
     year: str = ""
     authors: str = ""
     id: int = 0                   # citation number, assigned by number_sources()
+    content: str = ""             # full page text, filled by pages.read_top_pages()
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        """Public representation sent to the browser (page text is left out)."""
+        data = asdict(self)
+        data.pop("content")
+        data["read"] = bool(self.content)
+        return data
 
 
 def _clean(text: str) -> str:
@@ -246,12 +252,14 @@ def number_sources(sources: list[Source]) -> list[Source]:
 
 
 async def gather_sources(topic: str) -> list[Source]:
-    """Run web and academic search concurrently and return numbered sources."""
+    """Run web and academic search concurrently, number the sources, read the top pages."""
     web, papers = await asyncio.gather(
         asyncio.to_thread(web_search, topic, settings.web_results),
         academic_search(topic, settings.paper_results),
     )
-    return number_sources(web + papers)
+    sources = number_sources(web + papers)
+    await read_top_pages(sources)
+    return sources
 
 
 def format_context(sources: list[Source]) -> str:
@@ -268,7 +276,9 @@ def format_context(sources: list[Source]) -> str:
         meta: str = ", ".join(x for x in (src.origin if src.kind == "paper" else "", src.year) if x)
         lines.append(f"[{src.id}] ({label}) {src.title}" + (f" — {meta}" if meta else ""))
         lines.append(f"    URL: {src.url}")
-        if src.snippet:
+        if src.content:
+            lines.append(f"    Content (from the page): {src.content}")
+        elif src.snippet:
             lines.append(f"    Content: {src.snippet[:settings.snippet_chars]}")
         lines.append("")
     return "\n".join(lines).strip()
