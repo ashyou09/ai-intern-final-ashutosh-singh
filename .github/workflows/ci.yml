@@ -27,3 +27,19 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t ai-research-assistant .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name app -p 8000:8000 ai-research-assistant
+          for i in $(seq 1 20); do curl -fs http://localhost:8000/health && break; sleep 1; done
+          curl -fs http://localhost:8000/health
+          curl -fs -o /dev/null http://localhost:8000/
+          docker rm -f app

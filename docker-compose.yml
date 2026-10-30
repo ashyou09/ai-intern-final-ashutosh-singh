@@ -1,0 +1,10 @@
+# Start with:  docker compose up --build
+# Then open:   http://localhost:8000
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
