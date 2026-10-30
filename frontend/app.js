@@ -18,6 +18,7 @@ const errorDismiss = document.getElementById("error-dismiss");
 const resultsSection = document.getElementById("results");
 const summaryContent = document.getElementById("summary-content");
 const resultsTopic = document.getElementById("results-topic");
+const resultsStatsEl = document.getElementById("results-stats");
 const exportTxtBtn = document.getElementById("export-txt");
 const exportPdfBtn = document.getElementById("export-pdf");
 const exportMdBtn = document.getElementById("export-md");
@@ -207,6 +208,25 @@ topicInput.addEventListener("input", () => {
     charCount.style.color = len > 450 ? (len > 500 ? "#fb7185" : "#f59e0b") : "";
 });
 
+// --- Example topics ---
+document.querySelectorAll(".example-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+        if (researchBtn.disabled) return;
+        topicInput.value = chip.textContent;
+        charCount.textContent = topicInput.value.length;
+        researchBtn.click();
+    });
+});
+
+// --- "/" focuses the search box (unless already typing somewhere) ---
+document.addEventListener("keydown", (e) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        topicInput.focus();
+    }
+});
+
 // --- Enter key to submit ---
 topicInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !researchBtn.disabled) {
@@ -335,7 +355,7 @@ function handleStreamEvent(payload) {
 
         case "done":
             currentSources = payload.sources || [];
-            finishRender();
+            finishRender(payload.model);
             addToHistory({
                 topic: currentTopic,
                 summary: currentRawSummary,
@@ -353,16 +373,40 @@ function handleStreamEvent(payload) {
 }
 
 /** Final render: remove the cursor, enable export, typeset math. */
-function finishRender() {
+function finishRender(model) {
     loadingSection.classList.add("hidden");
     resultsSection.classList.remove("hidden");
     summaryContent.innerHTML = renderRichContent(currentRawSummary);
+    renderStats(model);
     setExportEnabled(true);
 
     if (window.MathJax && MathJax.typesetPromise) {
         MathJax.typesetClear([summaryContent]);
         MathJax.typesetPromise([summaryContent]).catch((err) => console.log("MathJax error:", err));
     }
+}
+
+/** Chips under the title: model, source counts, pages read, reading time. */
+function renderStats(model) {
+    const stats = resultsStatsEl;
+    stats.innerHTML = "";
+    const papers = currentSources.filter((s) => s.kind === "paper").length;
+    const web = currentSources.length - papers;
+    const read = currentSources.filter((s) => s.read).length;
+    const words = currentRawSummary.split(/\s+/).filter(Boolean).length;
+    const chips = [
+        model && `Model: ${model}`,
+        currentSources.length && `${web} web · ${papers} paper${papers === 1 ? "" : "s"}`,
+        read && `${read} page${read === 1 ? "" : "s"} read in full`,
+        words && `${Math.max(1, Math.round(words / 220))} min read`,
+    ].filter(Boolean);
+    chips.forEach((text) => {
+        const chip = document.createElement("span");
+        chip.className = "stat-chip";
+        chip.textContent = text;
+        stats.appendChild(chip);
+    });
+    stats.classList.toggle("hidden", chips.length === 0);
 }
 
 function setExportEnabled(enabled) {
@@ -558,7 +602,7 @@ function renderRichContent(text) {
             if (!inList) { html += '<ol class="rc-list rc-ol">'; inList = "ol"; }
             const n = numMatch[1];
             const anchor = inSources ? ` id="ref-${n}"` : "";
-            html += `<li value="${n}"${anchor}>${inlineFormat(numMatch[2])}</li>`;
+            html += `<li value="${n}"${anchor}>${inlineFormat(numMatch[2])}${inSources ? sourceBadges(n) : ""}</li>`;
             continue;
         }
 
@@ -582,6 +626,16 @@ function renderRichContent(text) {
     if (inList) html += `</${inList}>`;
     if (inTable) html += renderTable(tableRows);
 
+    return html;
+}
+
+/** Small "Paper" / "Read in full" badges for an entry in the Sources list. */
+function sourceBadges(n) {
+    const src = currentSources.find((s) => String(s.id) === String(n));
+    if (!src) return "";
+    let html = "";
+    if (src.kind === "paper") html += '<span class="src-badge src-paper">Paper</span>';
+    if (src.read) html += '<span class="src-badge src-read">Read in full</span>';
     return html;
 }
 
@@ -805,7 +859,7 @@ function openHistoryItem(id) {
     topicInput.value = item.topic;
     charCount.textContent = item.topic.length;
     resultsTopic.textContent = item.topic;
-    finishRender();
+    finishRender(item.model);
     resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -842,6 +896,7 @@ function hideError() {
 
 function hideResults() {
     resultsSection.classList.add("hidden");
+    resultsStatsEl.classList.add("hidden");
 }
 
 // --- Loading Step Animation ---
@@ -1043,4 +1098,7 @@ function animate() {
     
     requestAnimationFrame(animate);
 }
-animate();
+// Respect "reduce motion": skip the decorative animation entirely
+if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    animate();
+}
