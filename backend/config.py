@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_tokens: int = 2000
 
     # Search
+    cache_ttl: int = 3600         # seconds to reuse a topic's sources (0 = no caching)
     plan_queries: bool = True     # let the model split the topic into focused sub-queries
     max_subqueries: int = 3
     web_results: int = 6

@@ -32,6 +32,7 @@ import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from backend.cache import TTLCache, topic_key
 from backend.config import settings
 from backend.pages import is_safe_url
 from backend.prompts import PLANNER_PROMPT, RESEARCH_SYSTEM_PROMPT, build_user_prompt
@@ -41,6 +42,9 @@ from backend.utils import logger
 
 # Server-configured models (module-level name so tests can replace it)
 get_model_chain = server_model_chain
+
+# topic → (planned queries, sources); repeated topics skip planning and searching
+source_cache = TTLCache(ttl=settings.cache_ttl, max_entries=200)
 
 
 def sse(event_type: str, **data: Any) -> str:
@@ -119,18 +123,30 @@ async def run_research_workflow(topic: str, user_llm: UserLLM | None = None) -> 
                                    "or set OPENROUTER_API_KEY / GROQ_API_KEY on the server.")
         return
 
-    yield sse("status", stage="plan", message="Planning searches...")
-    queries: list[str] = await plan_queries(topic, chain)
-    if queries:
-        yield sse("plan", queries=queries)
+    queries: list[str]
+    sources: list[Source]
+    cached = source_cache.get(topic_key(topic))
+    if cached:
+        queries, sources = cached
+        logger.info(f"Using cached sources for: {topic}")
+        if queries:
+            yield sse("plan", queries=queries)
+        yield sse("status", stage="search", message="Using recently gathered sources...", cached=True)
+    else:
+        yield sse("status", stage="plan", message="Planning searches...")
+        queries = await plan_queries(topic, chain)
+        if queries:
+            yield sse("plan", queries=queries)
 
-    yield sse("status", stage="search", message="Searching the web and academic databases...")
-    try:
-        sources: list[Source] = await gather_sources(topic, queries)
-    except Exception as e:
-        logger.error(f"Source gathering failed: {e}")
-        sources = []
-    logger.info(f"Gathered {len(sources)} sources for: {topic}")
+        yield sse("status", stage="search", message="Searching the web and academic databases...")
+        try:
+            sources = await gather_sources(topic, queries)
+        except Exception as e:
+            logger.error(f"Source gathering failed: {e}")
+            sources = []
+        if sources:
+            source_cache.set(topic_key(topic), (queries, sources))
+        logger.info(f"Gathered {len(sources)} sources for: {topic}")
 
     read: int = sum(1 for s in sources if s.content)
     yield sse("status", stage="analyze",
