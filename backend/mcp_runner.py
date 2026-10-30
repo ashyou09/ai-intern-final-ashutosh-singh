@@ -34,7 +34,7 @@ async def run_tool(server_script: str, tool_name: str, tool_args: dict[str, obje
         The concatenated text output from the tool call.
     """
     server_params = StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=[server_script],
     )
 

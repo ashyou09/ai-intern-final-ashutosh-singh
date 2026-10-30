@@ -8,7 +8,8 @@ Provides two modes:
   2. Async context manager mode (MCPClient): Direct async connection for standalone
      scripts and testing.
 
-See CLAUDE_MCP_AND_CLAUDECODE_GUIDE.md → Section 1.9 for the MCP pattern.
+Server script paths are resolved relative to the project root, so the app
+works no matter which directory it is started from.
 """
 
 from __future__ import annotations
@@ -23,17 +24,27 @@ from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from pydantic import AnyUrl
 
+from backend.config import settings
 from backend.utils import logger
 
+PROJECT_ROOT: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # Path to the standalone MCP runner script
-_MCP_RUNNER_PATH: str = os.path.join(os.path.dirname(__file__), "mcp_runner.py")
+_MCP_RUNNER_PATH: str = os.path.join(PROJECT_ROOT, "backend", "mcp_runner.py")
+
+
+def resolve_server_path(server_script: str) -> str:
+    """Resolve a server script path relative to the project root."""
+    if os.path.isabs(server_script):
+        return server_script
+    return os.path.join(PROJECT_ROOT, server_script)
 
 
 def call_tool_subprocess(
     server_script: str,
     tool_name: str,
     tool_input: dict[str, Any],
-    timeout: int = 30,
+    timeout: int | None = None,
 ) -> str:
     """
     Call an MCP tool via a clean subprocess — no async conflicts.
@@ -45,7 +56,7 @@ def call_tool_subprocess(
         server_script: Path to the MCP server script (e.g. 'mcp_servers/web_search_server.py').
         tool_name: Name of the tool to invoke on the MCP server.
         tool_input: Dict of arguments to pass to the tool.
-        timeout: Maximum seconds to wait for the subprocess.
+        timeout: Maximum seconds to wait (defaults to settings.mcp_timeout).
 
     Returns:
         The text output from the MCP tool call.
@@ -53,14 +64,16 @@ def call_tool_subprocess(
     Raises:
         RuntimeError: If the subprocess fails or times out.
     """
+    timeout = timeout or settings.mcp_timeout
     logger.info(f"[MCP] Calling {tool_name} on {server_script} via subprocess")
 
     try:
         result: subprocess.CompletedProcess[str] = subprocess.run(
-            [sys.executable, _MCP_RUNNER_PATH, server_script, tool_name, json.dumps(tool_input)],
+            [sys.executable, _MCP_RUNNER_PATH, resolve_server_path(server_script), tool_name, json.dumps(tool_input)],
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=PROJECT_ROOT,
         )
 
         if result.returncode != 0:
@@ -74,7 +87,7 @@ def call_tool_subprocess(
 
     except subprocess.TimeoutExpired:
         logger.warning(f"[MCP] Tool {tool_name} timed out after {timeout}s")
-        raise RuntimeError(f"MCP tool {tool_name} timed out after {timeout}s")
+        raise RuntimeError(f"MCP tool {tool_name} timed out after {timeout}s") from None
 
 
 class MCPClient:
@@ -90,14 +103,14 @@ class MCPClient:
 
     def __init__(self, server_script: str) -> None:
         """Initialize with the path to the MCP server script."""
-        self.server_script: str = server_script
+        self.server_script: str = resolve_server_path(server_script)
         self._session: ClientSession | None = None
         self._stdio_context: Any = None
 
     async def __aenter__(self) -> MCPClient:
         """Start the MCP server subprocess and initialize the session."""
         server_params: StdioServerParameters = StdioServerParameters(
-            command="python",
+            command=sys.executable,
             args=[self.server_script],
         )
 
