@@ -1,6 +1,8 @@
 # AI Research Assistant
 
-> An AI-powered research tool that performs real-time web and academic paper searches, synthesizes the results using large language models, and exports professional PDF reports — built with FastAPI, MCP Protocol, and a streaming SSE frontend.
+[![CI](https://github.com/ashyou09/ai-intern-final-ashutosh-singh/actions/workflows/ci.yml/badge.svg)](https://github.com/ashyou09/ai-intern-final-ashutosh-singh/actions/workflows/ci.yml)
+
+> An AI research tool that searches the web and academic databases in real time, streams a summary in which every claim is cited, and exports professional PDF reports. Built with FastAPI, the Model Context Protocol (MCP) and a streaming SSE frontend.
 
 ---
 
@@ -27,14 +29,14 @@ Web: `https://ai-intern-final-ashutosh-singh.vercel.app/`
 
 ## Features
 
-- **Real-Time Streaming** — Results stream token-by-token directly to the browser via Server-Sent Events (SSE)
-- **MCP Tool Integration** — Web search is executed via a Model Context Protocol (MCP) server subprocess, with automatic DuckDuckGo fallback
-- **Dual AI Model Chain** — Tries OpenRouter (GPT) first, then falls back to Groq (LLaMA 70B → LLaMA 8B) automatically
-- **Academic Paper Search** — Searches arXiv, PubMed, Semantic Scholar, and Google Scholar in parallel with web search
-- **PDF Export Engine** — Generates high-fidelity reports with professional title banners, intelligent title casing (preserving small words like "in" and "with"), visible clickable links, and proper Unicode spacing (no joined characters).
-- **TXT Export** — Clean plain-text export of all research output.
-- **Math Rendering** — Formulas displayed in styled code blocks (frontend) and monospace Courier syntax in PDFs for technical accuracy.
-- **Responsive UI** — Dark-mode glassmorphism UI with animated loading states and step-by-step progress indicators
+- **Cited summaries.** Every source gets a number. The model cites claims as `[1]`, `[2]`, and each citation links to the matching entry in the Sources list.
+- **Real academic search.** The arXiv and Semantic Scholar APIs (free, no key) are queried concurrently, returning real abstracts, authors and years.
+- **MCP tool integration.** Web search runs through an MCP server subprocess, with an automatic DuckDuckGo fallback.
+- **Model fallback chain.** OpenRouter → Groq LLaMA 70B → Groq LLaMA 8B. If a model fails halfway through an answer, the partial text is discarded and the next model starts cleanly.
+- **Real-time streaming.** Results stream token by token over Server-Sent Events, with a **Stop** button.
+- **PDF and TXT export.** PDFs have a title banner, clickable links, tables and code blocks. Files are built in memory, so concurrent users never collide.
+- **Safe rendering.** All AI and web content is HTML-escaped, and only `http(s)` links are rendered.
+- **Tested.** A pytest suite plus ruff linting runs in GitHub Actions on Python 3.11–3.13.
 
 ---
 
@@ -44,85 +46,90 @@ Web: `https://ai-intern-final-ashutosh-singh.vercel.app/`
 |-------|-----------|
 | **Backend** | FastAPI (Python 3.11+) |
 | **AI Models** | OpenRouter (primary) · Groq (fallback) |
-| **MCP Protocol** | `fastmcp` — web search tool via stdio subprocess |
-| **Web Search** | DuckDuckGo Search (via MCP + direct fallback) |
+| **MCP Protocol** | `mcp` FastMCP server over stdio |
+| **Web Search** | DuckDuckGo (`ddgs`), via MCP with a direct fallback |
+| **Academic Search** | arXiv API · Semantic Scholar API (`httpx`) |
 | **PDF Engine** | fpdf2 |
-| **Frontend** | Vanilla HTML / CSS / JavaScript (SSE streaming) |
-| **Streaming** | Server-Sent Events (SSE) |
+| **Frontend** | Vanilla HTML / CSS / JavaScript |
+| **Testing** | pytest · ruff · GitHub Actions |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Frontend (Browser)               │
-│  index.html · style.css · app.js (SSE client)      │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP / SSE
-┌──────────────────────▼──────────────────────────────┐
-│               FastAPI Backend                       │
-│  routes.py  ──►  agent.py  ──►  prompts.py         │
-│                     │                               │
-│          ┌──────────┴──────────┐                    │
-│          │                     │                    │
-│    mcp_client.py          DuckDuckGo               │
-│    (subprocess)            (fallback)               │
-│          │                                          │
-│    mcp_runner.py                                    │
-│          │                                          │
-│   web_search_server.py  (MCP stdio server)         │
-│                                                     │
-│  exporter.py  ──►  outputs/*.pdf / *.txt           │
-│  config.py · errors.py · utils.py                  │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                  Frontend (Browser)                  │
+│   index.html · style.css · app.js (SSE client)       │
+└──────────────────────────┬───────────────────────────┘
+                           │ HTTP / SSE
+┌──────────────────────────▼───────────────────────────┐
+│                   FastAPI Backend                    │
+│  routes.py ──► agent.py ──► prompts.py               │
+│                   │                                  │
+│               search.py                              │
+│        ┌──────────┼─────────────────┐                │
+│        │          │                 │                │
+│  mcp_client.py  arXiv API   Semantic Scholar API     │
+│        │                                             │
+│  mcp_runner.py ──► web_search_server.py (MCP stdio)  │
+│        └─ fallback: DuckDuckGo directly              │
+│                                                      │
+│  exporter.py (PDF/TXT in memory)                     │
+│  config.py · errors.py · utils.py                    │
+└──────────────────────────────────────────────────────┘
 ```
 
-### MCP Integration Flow
+### Research flow
+
+1. `search.gather_sources()` runs web search and academic search **concurrently**.
+2. Results are de-duplicated by URL and numbered `[1]…[n]`.
+3. The numbered sources are passed to the model, which must cite them by number.
+4. The answer streams to the browser. A numbered **Sources** section is appended by the server (not the model), so every citation points to a real URL.
+
+### MCP integration
 
 ```
-agent.py
+search.web_search()
   └─► mcp_client.call_tool_subprocess()
-        └─► spawns mcp_runner.py (subprocess)
+        └─► spawns mcp_runner.py (subprocess, same Python interpreter)
               └─► connects to web_search_server.py via stdio
-                    └─► executes web_search tool
-                          └─► returns JSON result via stdout
+                    └─► executes the web_search tool → JSON on stdout
 ```
 
-The MCP server runs in a clean subprocess to isolate its event loop from FastAPI's async loop — a production-grade pattern that prevents event loop conflicts.
+The MCP client runs in its own subprocess so that its event loop stays separate from FastAPI's.
 
 ---
 
 ## Project Structure
 
 ```
-ai-intern-final/
+ai-intern-final-ashutosh-singh/
 ├── backend/
-│   ├── __init__.py
-│   ├── agent.py          # AI orchestration, MCP calls, streaming workflow
-│   ├── config.py         # Centralised env-var settings (Pydantic)
-│   ├── errors.py         # Custom exception types
+│   ├── agent.py          # Research workflow, model fallback chain, SSE events
+│   ├── search.py         # Web + academic search, source numbering, context formatting
+│   ├── config.py         # Centralised settings (pydantic-settings)
+│   ├── errors.py         # Exceptions and error handlers ({"error": "..."})
 │   ├── exporter.py       # PDF & TXT export engine (fpdf2)
-│   ├── main.py           # FastAPI app factory, static file serving
-│   ├── mcp_client.py     # MCP subprocess runner client
+│   ├── main.py           # FastAPI app: CORS, handlers, router, static files
+│   ├── mcp_client.py     # MCP subprocess client
 │   ├── mcp_runner.py     # MCP subprocess entry point
-│   ├── prompts.py        # All AI prompt templates (single source of truth)
-│   ├── routes.py         # API route handlers (/research, /export, /health)
-│   └── utils.py          # Logger setup
+│   ├── prompts.py        # All prompt templates
+│   ├── routes.py         # /research, /export, /health
+│   └── utils.py          # Logging and request models/validators
 ├── frontend/
-│   ├── index.html        # App shell, MathJax integration
-│   ├── style.css         # Dark glassmorphism UI design system
-│   └── app.js            # SSE streaming client, markdown renderer, export
+│   ├── index.html
+│   ├── style.css
+│   └── app.js            # SSE client, safe markdown renderer, export
 ├── mcp_servers/
-│   ├── __init__.py
-│   ├── web_search_server.py    # MCP web search tool (DuckDuckGo)
-│   └── filesystem_server.py    # MCP filesystem tool
-├── outputs/              # Runtime PDF/TXT output directory (gitignored)
-├── .env.example          # Environment variable template
-├── .gitignore
-├── CLAUDE.md             # AI coding context (architectural rules)
-├── README.md
-└── requirements.txt
+│   ├── web_search_server.py    # MCP web_search tool (DuckDuckGo)
+│   └── filesystem_server.py    # MCP save_research tool (standalone example)
+├── tests/                # pytest suite (no network or API keys needed)
+├── .github/workflows/ci.yml
+├── .env.example
+├── pyproject.toml
+├── requirements.txt
+└── requirements-dev.txt
 ```
 
 ---
@@ -156,15 +163,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with your API keys:
-
-```env
-OPENROUTER_API_KEY=your-openrouter-key-here
-GROQ_API_KEY=your-groq-key-here
-PRIMARY_MODEL=openai/gpt-4o-mini
-FALLBACK_MODEL=llama-3.3-70b-versatile
-OUTPUT_DIR=outputs
-```
+Then add at least one API key to `.env`.
 
 > **Get free API keys:**
 > - OpenRouter: [openrouter.ai](https://openrouter.ai) (many free models available)
@@ -180,51 +179,56 @@ Open **http://localhost:8000** in your browser.
 
 ---
 
+## Running Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+ruff check backend mcp_servers tests
+```
+
+The tests mock every search engine and AI model, so they need no network or API keys.
+
+---
+
 ## API Reference
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Serves the frontend UI |
-| `/research` | GET (SSE) | Streams research results for a topic |
-| `/export` | POST | Exports content as `.pdf` or `.txt` |
-| `/health` | GET | Server health check |
+| `/research` | POST (SSE) | Streams a cited research summary for a topic |
+| `/export` | POST | Returns the content as a `.pdf` or `.txt` download |
+| `/health` | GET | Health check and list of configured models |
 
-### Example: Research endpoint
-
-```
-GET /research?topic=quantum+computing
-```
-
-**Stream response** (SSE events):
+### `POST /research`
 
 ```json
-{"type": "status",  "message": "Searching the web..."}
-{"type": "content", "text": "## Overview\nQuantum computers..."}
-{"type": "done",    "sources": ["https://..."], "model": "llama-3.3-70b"}
+{ "topic": "quantum computing" }
 ```
 
-### Example: Export endpoint
+The response is `text/event-stream`. Each event is a `data:` line containing JSON:
 
 ```json
-POST /export
-{
-  "content": "## Overview\n...",
-  "filename": "quantum_computing",
-  "format": "pdf"
-}
+{"type": "status",  "stage": "search", "message": "Searching the web and academic databases..."}
+{"type": "status",  "stage": "analyze", "message": "Analyzing 10 sources..."}
+{"type": "status",  "stage": "write", "message": "Writing summary with openai/gpt-oss-120b:free..."}
+{"type": "content", "text": "# Quantum Computing\n\n## Overview\nQuantum computers ... [1]"}
+{"type": "reset",   "message": "The model stopped mid-answer; retrying with a fallback model."}
+{"type": "done",    "sources": [{"id": 1, "title": "...", "url": "https://...", "kind": "web"}], "model": "...", "topic": "..."}
+{"type": "error",   "message": "All AI models failed. ..."}
 ```
 
----
+`reset` is only sent when a model fails after it has started answering. The client should discard the text streamed so far.
 
-## Code Quality Standards
+### `POST /export`
 
-- **Type hints** on all functions and variables
-- **Docstrings** on every function following Google style
-- **Centralised config** via `backend/config.py` — no hardcoded credentials anywhere
-- **Centralised error handling** via `backend/errors.py`
-- **Prompt isolation** — all AI prompts live only in `backend/prompts.py`
-- **Separation of concerns** — AI logic in `agent.py`, HTTP in `routes.py`
-- **Structured logging** via Python `logging` module throughout
+```json
+{ "content": "# Title\n\n## Overview\n...", "filename": "quantum_computing", "format": "pdf" }
+```
+
+### Errors
+
+Every error has the shape `{"error": "<message>"}`. For example, an empty topic returns `422 {"error": "Topic cannot be empty."}`.
 
 ---
 
@@ -233,11 +237,14 @@ POST /export
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OPENROUTER_API_KEY` | Yes* | — | OpenRouter API key (primary model) |
-| `GROQ_API_KEY` | Yes* | — | Groq API key (fallback model) |
-| `PRIMARY_MODEL` | No | `openai/gpt-4o-mini` | Primary OpenRouter model ID |
-| `FALLBACK_MODEL` | No | `llama-3.3-70b-versatile` | Groq fallback model |
-| `OUTPUT_DIR` | No | `outputs` | Directory for exported files |
-| `MAX_TOKENS` | No | `1500` | Max tokens per AI response |
+| `GROQ_API_KEY` | Yes* | — | Groq API key (fallback models) |
+| `PRIMARY_MODEL` | No | `openai/gpt-oss-120b:free` | OpenRouter model ID |
+| `FALLBACK_MODEL` | No | `llama-3.3-70b-versatile` | First Groq fallback |
+| `FALLBACK_MODEL_2` | No | `llama-3.1-8b-instant` | Second Groq fallback |
+| `MAX_TOKENS` | No | `2000` | Max tokens per AI response |
+| `WEB_RESULTS` | No | `6` | Number of web results |
+| `PAPER_RESULTS` | No | `4` | Number of academic papers |
+| `CORS_ORIGINS` | No | `*` | Comma-separated allowed origins |
 
 > *At least one of `OPENROUTER_API_KEY` or `GROQ_API_KEY` must be set.
 
@@ -245,10 +252,10 @@ POST /export
 
 ## Security
 
-- `.env` is listed in `.gitignore` and never committed
-- All secrets are accessed only through `backend/config.py` using Pydantic Settings
-- No credentials are hardcoded anywhere in the codebase
-- CORS is configured for localhost development only
+- `.env` is gitignored, and secrets are read only through `backend/config.py`.
+- AI output and web content are HTML-escaped before rendering. Only `http(s)` links are allowed.
+- Export filenames are sanitised, which prevents path traversal and header injection.
+- CORS origins are configurable. Set `CORS_ORIGINS` to your domain in production.
 
 ---
 
