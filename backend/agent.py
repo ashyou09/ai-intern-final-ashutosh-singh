@@ -1,380 +1,134 @@
 """
-Core AI orchestration — Agent with MCP tool-use loop.
+Core AI orchestration — gathers sources, then streams a cited summary.
 
-Architecture:
-  - Primary model: OpenRouter (gpt-oss-120b:free) via OpenAI-compatible API
-  - Fallback model: Groq (llama-3.3-70b-versatile) if primary fails
-  - Tool execution: MCP web_search server via stdio subprocess
-  - Direct fallback: DuckDuckGo if MCP server is unavailable
+Workflow:
+  1. search.gather_sources() runs web search (MCP server, DuckDuckGo fallback)
+     and academic search (arXiv + Semantic Scholar) concurrently.
+  2. Sources are numbered and passed to the model as plain text.
+  3. The model chain (OpenRouter → Groq 70B → Groq 8B) streams the summary.
+     If a model fails mid-stream, a `reset` event tells the client to discard
+     the partial text before the next model starts.
+  4. A numbered "Sources" section is appended programmatically, so the
+     citations always point at real URLs.
 
-MCP Integration:
-  The agent calls tools via `mcp_client.call_tool_subprocess()`, which
-  spawns `backend/mcp_runner.py` as a clean subprocess. That runner
-  connects to the MCP server via stdio, executes the tool, and returns
-  the result via stdout. This cleanly separates event loops.
+SSE events (all JSON in `data:` lines):
+  status  {stage: search|analyze|write, message}
+  content {text}
+  reset   {message}        — discard streamed text, a fallback model is starting
+  done    {sources, model, topic}
+  error   {message}
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, AsyncGenerator
-import asyncio
 
-from openai import AsyncOpenAI
 from groq import AsyncGroq
-from duckduckgo_search import DDGS
+from openai import AsyncOpenAI
 
-from backend.mcp_client import call_tool_subprocess
-from backend.prompts import RESEARCH_SYSTEM_PROMPT
 from backend.config import settings
-from backend.errors import ClaudeAPIError
+from backend.prompts import RESEARCH_SYSTEM_PROMPT, build_user_prompt
+from backend.search import Source, build_sources_markdown, format_context, gather_sources
 from backend.utils import logger
 
-
-# =========================================================================
-# Tool Execution — MCP subprocess first, DuckDuckGo fallback
-# =========================================================================
-
-def _execute_web_search(query: str, num_results: int = 5) -> str:
-    """
-    Execute a web search. Tries MCP server (via subprocess) first,
-    then falls back to direct DuckDuckGo call if MCP fails.
-
-    Args:
-        query: The search query string.
-        num_results: Number of results to return (1-10).
-
-    Returns:
-        JSON string with list of {title, url, snippet} objects.
-    """
-    # --- MCP Server (proper subprocess integration) ---
-    try:
-        result: str = call_tool_subprocess(
-            server_script="mcp_servers/web_search_server.py",
-            tool_name="web_search",
-            tool_input={"query": query, "num_results": num_results},
-        )
-        if result and "error" not in result.lower()[:50]:
-            logger.info("[MCP] web_search succeeded via MCP subprocess")
-            return result
-    except Exception as e:
-        logger.warning(f"[MCP] web_search failed, falling back to direct: {e}")
-
-    # --- Fallback: Direct DuckDuckGo ---
-    try:
-        with DDGS() as ddgs:
-            raw_results: list[dict[str, str]] = list(
-                ddgs.text(query, max_results=min(num_results, 10))
-            )
-        results: list[dict[str, str]] = [
-            {
-                "title": item.get("title", ""),
-                "url": item.get("href", ""),
-                "snippet": item.get("body", ""),
-            }
-            for item in raw_results
-        ]
-        return json.dumps(results)
-    except Exception as e:
-        logger.error(f"DuckDuckGo fallback also failed: {e}")
-        return json.dumps([{"error": f"All search methods failed: {str(e)}"}])
+OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
 
-def _search_academic_papers(query: str, num_results: int = 5) -> str:
-    """
-    Search for academic papers using DuckDuckGo with scholar-targeted queries.
-
-    Targets arXiv, PubMed, Semantic Scholar, and Google Scholar.
-
-    Args:
-        query: The academic research query.
-        num_results: Number of papers to return (1-10).
-
-    Returns:
-        JSON string with list of {title, url, abstract, source} objects.
-    """
-    try:
-        # Simpler query format that DuckDuckGo handles reliably
-        academic_query: str = f"{query} research paper filetype:pdf arxiv scholar"
-        with DDGS() as ddgs:
-            raw_results: list[dict[str, str]] = list(
-                ddgs.text(academic_query, max_results=min(num_results, 10))
-            )
-        papers: list[dict[str, str]] = [
-            {
-                "title": item.get("title", ""),
-                "url": item.get("href", ""),
-                "abstract": item.get("body", ""),
-                "source": _detect_source(item.get("href", "")),
-            }
-            for item in raw_results
-        ]
-        return json.dumps(papers)
-    except Exception as e:
-        logger.error(f"Academic search failed: {e}")
-        return json.dumps([{"error": f"Academic search failed: {str(e)}"}])
+@dataclass(frozen=True)
+class ModelOption:
+    provider: str
+    model: str
+    client: Any
 
 
-def _detect_source(url: str) -> str:
-    """Detect the academic source from a URL."""
-    source_map: dict[str, str] = {
-        "arxiv.org": "arXiv",
-        "scholar.google": "Google Scholar",
-        "semanticscholar": "Semantic Scholar",
-        "pubmed": "PubMed",
-        "ieee": "IEEE",
-        "acm.org": "ACM",
-    }
-    for pattern, name in source_map.items():
-        if pattern in url:
-            return name
-    return "Web"
+def _key_is_set(key: str) -> bool:
+    return bool(key) and not key.startswith("your-")
 
 
-def _format_context(web_json: str, academic_json: str) -> str:
-    """
-    Convert raw JSON search results into clean readable text for the AI.
-
-    The AI often fails to parse raw JSON blobs correctly and misses URLs.
-    This function pre-processes both result sets into clearly labelled
-    plain text so the model can reliably reference every source URL.
-
-    Args:
-        web_json: JSON string from web search results.
-        academic_json: JSON string from academic paper search.
-
-    Returns:
-        A structured plain-text context block for the AI prompt.
-    """
-    sections: list[str] = []
-
-    # --- Web Results ---
-    try:
-        web_data: list[dict] = json.loads(web_json)
-        if web_data and not (len(web_data) == 1 and "error" in web_data[0]):
-            lines = ["=== WEB SEARCH RESULTS ==="]
-            for i, item in enumerate(web_data, 1):
-                title = item.get("title", "Untitled")
-                url = item.get("url", item.get("href", ""))
-                snippet = item.get("snippet", item.get("body", ""))
-                lines.append(f"[{i}] {title}")
-                lines.append(f"    URL: {url}")
-                lines.append(f"    Summary: {snippet[:300]}")
-                lines.append("")
-            sections.append("\n".join(lines))
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("Could not parse web results JSON")
-
-    # --- Academic Papers ---
-    try:
-        academic_data: list[dict] = json.loads(academic_json)
-        if academic_data and not (len(academic_data) == 1 and "error" in academic_data[0]):
-            lines = ["=== ACADEMIC PAPERS ==="]
-            for i, item in enumerate(academic_data, 1):
-                title = item.get("title", "Untitled")
-                url = item.get("url", "")
-                abstract = item.get("abstract", "")
-                source = item.get("source", "Web")
-                lines.append(f"[{i}] {title} ({source})")
-                lines.append(f"    URL: {url}")
-                lines.append(f"    Abstract: {abstract[:300]}")
-                lines.append("")
-            sections.append("\n".join(lines))
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("Could not parse academic results JSON")
-
-    if not sections:
-        return "No search results were available."
-
-    return "\n\n".join(sections)
+@lru_cache(maxsize=1)
+def _openrouter_client() -> AsyncOpenAI:
+    return AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=settings.openrouter_api_key)
 
 
-# =========================================================================
-# Main Streaming Workflow
-# =========================================================================
+@lru_cache(maxsize=1)
+def _groq_client() -> AsyncGroq:
+    return AsyncGroq(api_key=settings.groq_api_key)
+
+
+def get_model_chain() -> list[ModelOption]:
+    """Return the configured models in fallback order. Clients are reused across requests."""
+    chain: list[ModelOption] = []
+    if _key_is_set(settings.openrouter_api_key):
+        chain.append(ModelOption("OpenRouter", settings.primary_model, _openrouter_client()))
+    if _key_is_set(settings.groq_api_key):
+        chain.append(ModelOption("Groq", settings.fallback_model, _groq_client()))
+        chain.append(ModelOption("Groq", settings.fallback_model_2, _groq_client()))
+    return chain
+
+
+def sse(event_type: str, **data: Any) -> str:
+    """Format one Server-Sent Event."""
+    return f"data: {json.dumps({'type': event_type, **data})}\n\n"
+
 
 async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
-    """
-    Run the research workflow. Gathers data first, then streams the response.
-    """
-    sources: list[str] = []
+    """Gather sources, then stream the model's summary as SSE events."""
+    yield sse("status", stage="search", message="Searching the web and academic databases...")
 
-    yield f"data: {json.dumps({'type': 'status', 'message': f'Starting research on: {topic}'})}\n\n"
-    await asyncio.sleep(0.1)
+    try:
+        sources: list[Source] = await gather_sources(topic)
+    except Exception as e:
+        logger.error(f"Source gathering failed: {e}")
+        sources = []
+    logger.info(f"Gathered {len(sources)} sources for: {topic}")
 
-    yield f"data: {json.dumps({'type': 'status', 'message': 'Searching the web and academic databases...'})}\n\n"
+    yield sse("status", stage="analyze", message=f"Analyzing {len(sources)} sources...")
 
-    # Run the web search and academic search concurrently in thread pool
-    web_results, academic_results = await asyncio.gather(
-        asyncio.to_thread(_execute_web_search, topic, 6),
-        asyncio.to_thread(_search_academic_papers, topic, 4)
-    )
-    _extract_sources(web_results, sources)
-    _extract_sources(academic_results, sources)
-
-    yield f"data: {json.dumps({'type': 'status', 'message': 'Analyzing gathered information...'})}\n\n"
-
-    # Pre-process JSON → clean readable text so the AI never misses a URL
-    context: str = _format_context(web_results, academic_results)
-
-    base_messages = [
+    messages: list[dict[str, str]] = [
         {"role": "system", "content": RESEARCH_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"Research the following topic thoroughly: {topic}\n\n"
-                f"Use the search results below to write your summary. "
-                f"Every URL listed here MUST appear in your Sources section.\n\n"
-                f"{context}"
-            ),
-        },
+        {"role": "user", "content": build_user_prompt(topic, format_context(sources))},
     ]
 
-    # Models chain list
-    models_to_try = []
-    if settings.openrouter_api_key and not settings.openrouter_api_key.startswith("your-"):
-        models_to_try.append({
-            "provider": "OpenRouter",
-            "model": settings.primary_model,
-            "client": AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=settings.openrouter_api_key)
-        })
-    if settings.groq_api_key and not settings.groq_api_key.startswith("your-"):
-        models_to_try.append({
-            "provider": "Groq-70B",
-            "model": settings.fallback_model,
-            "client": AsyncGroq(api_key=settings.groq_api_key)
-        })
-        models_to_try.append({
-            "provider": "Groq-8B",
-            "model": settings.fallback_model_2,
-            "client": AsyncGroq(api_key=settings.groq_api_key)
-        })
+    chain: list[ModelOption] = get_model_chain()
+    if not chain:
+        yield sse("error", message="No AI model is configured. Set OPENROUTER_API_KEY or GROQ_API_KEY.")
+        return
 
-    for config in models_to_try:
+    for option in chain:
+        streamed_any: bool = False
         try:
-            provider_name = config['provider']
-            logger.info(f"Trying {provider_name} model: {config['model']}")
-            yield f"data: {json.dumps({'type': 'status', 'message': f'Generating summary using {provider_name}...'})}\n\n"
-            stream = await config['client'].chat.completions.create(
-                model=config['model'],
-                messages=base_messages,
+            logger.info(f"Trying {option.provider} model: {option.model}")
+            yield sse("status", stage="write", message=f"Writing summary with {option.model}...")
+            stream = await option.client.chat.completions.create(
+                model=option.model,
+                messages=messages,
                 max_tokens=settings.max_tokens,
-                stream=True
+                stream=True,
             )
-
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
-                    text_chunk = chunk.choices[0].delta.content
-                    yield f"data: {json.dumps({'type': 'content', 'text': text_chunk})}\n\n"
+                    streamed_any = True
+                    yield sse("content", text=chunk.choices[0].delta.content)
 
-            # After AI finishes, append papers programmatically
-            papers_md = _build_papers_section(academic_results)
-            
-            if papers_md:
-                yield f"data: {json.dumps({'type': 'content', 'text': papers_md})}\n\n"
-
-            # End of stream
-            logger.info(f"{config['provider']} model succeeded")
-            yield f"data: {json.dumps({'type': 'done', 'sources': list(set(sources)), 'model': config['model'], 'topic': topic})}\n\n"
-            return
+            if not streamed_any:
+                raise RuntimeError("model returned an empty response")
 
         except Exception as e:
-            logger.warning(f"{config['provider']} model failed: {e}")
-
-    # If all fail
-    error_msg = "All AI models failed. Please check your API keys."
-    logger.error(error_msg)
-    yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
-    raise ClaudeAPIError(error_msg)
-
-
-def _extract_sources(result: str, sources: list[str]) -> None:
-    """Extract URLs from tool results and add them to the sources list."""
-    try:
-        data: Any = json.loads(result)
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict) and "url" in item:
-                    url: str = item["url"]
-                    if url and not url.startswith("https://example.com"):
-                        sources.append(url)
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-
-def _build_papers_section(academic_json: str) -> str:
-    """
-    Build a markdown 'Related Research Papers' section from academic search results.
-
-    This is appended programmatically after the AI stream, so it always
-    contains real data regardless of how the AI model behaves.
-
-    Args:
-        academic_json: JSON string from academic paper search.
-
-    Returns:
-        Markdown string with the papers section, or empty string if none.
-    """
-    try:
-        data: list[dict] = json.loads(academic_json)
-        if not data or (len(data) == 1 and "error" in data[0]):
-            return ""
-        lines = ["\n\n## Related Research Papers\n"]
-        for item in data:
-            title = item.get("title", "Untitled")
-            url = item.get("url", "")
-            abstract = item.get("abstract", "")
-            source = item.get("source", "Web")
-            if url:
-                lines.append(f"- **{title}** — {source}")
-                lines.append(f"  - {abstract[:150]}")
-                lines.append(f"  - [{url}]({url})\n")
-        return "\n".join(lines) if len(lines) > 1 else ""
-    except (json.JSONDecodeError, TypeError):
-        return ""
-
-
-def _build_sources_section(web_json: str, academic_json: str) -> str:
-    """
-    Build a markdown 'Sources' section from all search results.
-
-    Collects every unique URL from both web and academic results
-    and formats them as clickable markdown links.
-
-    Args:
-        web_json: JSON string from web search results.
-        academic_json: JSON string from academic search results.
-
-    Returns:
-        Markdown string with all source URLs.
-    """
-    urls: list[tuple[str, str]] = []  # (title, url)
-    for raw in [web_json, academic_json]:
-        try:
-            data: list[dict] = json.loads(raw)
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, dict):
-                        url = item.get("url", item.get("href", ""))
-                        title = item.get("title", url)
-                        if url and "error" not in str(item.get("error", "")):
-                            urls.append((title, url))
-        except (json.JSONDecodeError, TypeError):
+            logger.warning(f"{option.provider} model {option.model} failed: {e}")
+            if streamed_any:
+                yield sse("reset", message="The model stopped mid-answer; retrying with a fallback model.")
             continue
 
-    if not urls:
-        return ""
+        references: str = build_sources_markdown(sources)
+        if references:
+            yield sse("content", text=references)
 
-    # Deduplicate by URL
-    seen: set[str] = set()
-    unique: list[tuple[str, str]] = []
-    for title, url in urls:
-        if url not in seen:
-            seen.add(url)
-            unique.append((title, url))
+        logger.info(f"{option.model} succeeded")
+        yield sse("done", sources=[s.to_dict() for s in sources], model=option.model, topic=topic)
+        return
 
-    lines = ["\n\n## Sources\n"]
-    for title, url in unique:
-        lines.append(f"- [{title}]({url})")
-
-    return "\n".join(lines)
+    logger.error("All AI models failed")
+    yield sse("error", message="All AI models failed. Please check your API keys or try again later.")

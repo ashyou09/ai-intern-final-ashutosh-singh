@@ -11,7 +11,7 @@ import json
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 mcp = FastMCP("WebSearchMCP", log_level="ERROR")
 
@@ -26,8 +26,7 @@ def web_search(
 ) -> str:
     """Search the web using DuckDuckGo and return structured results."""
     try:
-        with DDGS() as ddgs:
-            raw_results = list(ddgs.text(query, max_results=min(num_results, 10)))
+        raw_results = list(DDGS().text(query, max_results=max(1, min(num_results, 10))))
 
         results = []
         for item in raw_results:
