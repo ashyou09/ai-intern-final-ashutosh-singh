@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=15">
+    <link rel="stylesheet" href="style.css?v=16">
     
     <!-- MathJax for rendering LaTeX/Math -->
     <script>
@@ -55,6 +55,13 @@
                     <p class="app-subtitle">AI-Powered Research &middot; Real-time Web Search &middot; Academic Papers &middot; Export to PDF</p>
                 </div>
             </div>
+            <button id="settings-btn" class="model-badge" type="button" aria-haspopup="dialog" title="AI model settings">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                <span id="model-badge-text">Server models</span>
+            </button>
         </header>
 
         <!-- Search Section -->
@@ -121,6 +128,12 @@
                 </div>
             </div>
         </section>
+
+        <!-- Notices (non-fatal, e.g. your own API key failed) -->
+        <div id="notice-bar" class="notice-bar hidden" role="status">
+            <span id="notice-text"></span>
+            <button id="notice-dismiss" class="notice-close" type="button" aria-label="Dismiss">&times;</button>
+        </div>
 
         <!-- Error Display -->
         <section id="error-section" class="error-section hidden">
@@ -191,12 +204,65 @@
             </button>
         </section>
 
+        <!-- Settings: bring your own API key -->
+        <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+            <form id="settings-form" class="settings-form" novalidate>
+                <h2 id="settings-title" class="settings-title">AI model settings</h2>
+                <p class="settings-intro">
+                    Free server models can be busy or run out of quota. Add your own API key to use your
+                    preferred provider. Your model is tried first and the server models stay as a backup.
+                </p>
+
+                <label class="field">
+                    <span class="field-label">Provider</span>
+                    <select id="llm-provider" class="field-input"></select>
+                </label>
+
+                <div class="field">
+                    <label class="field-label" for="llm-key">API key</label>
+                    <div class="key-row">
+                        <input id="llm-key" class="field-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key">
+                        <button id="llm-key-toggle" class="btn btn-ghost btn-small" type="button">Show</button>
+                    </div>
+                    <a id="llm-key-link" class="field-hint-link" href="#" target="_blank" rel="noopener noreferrer">Get a key</a>
+                </div>
+
+                <label class="field">
+                    <span class="field-label">Model <span class="field-optional">(optional)</span></span>
+                    <input id="llm-model" class="field-input" type="text" autocomplete="off" spellcheck="false">
+                </label>
+
+                <label id="llm-base-row" class="field hidden">
+                    <span class="field-label">Base URL</span>
+                    <input id="llm-base-url" class="field-input" type="url" placeholder="https://api.example.com/v1">
+                </label>
+
+                <label class="field-check">
+                    <input id="llm-remember" type="checkbox">
+                    <span>Remember on this device</span>
+                </label>
+
+                <p class="settings-privacy">
+                    Your key stays in this browser and is sent only with your research requests.
+                    The server never stores or logs it.
+                </p>
+                <p id="settings-error" class="settings-error hidden" role="alert"></p>
+
+                <div class="settings-actions">
+                    <button id="llm-clear" class="btn btn-ghost" type="button">Remove key</button>
+                    <span class="settings-spacer"></span>
+                    <button id="llm-cancel" class="btn btn-outline" type="button">Cancel</button>
+                    <button class="btn btn-primary" type="submit">Save</button>
+                </div>
+            </form>
+        </dialog>
+
         <!-- Footer -->
         <footer class="app-footer">
             <p>Built with FastAPI &middot; MCP Protocol &middot; OpenRouter &amp; Groq</p>
         </footer>
     </div>
 
-    <script src="app.js?v=30"></script>
+    <script src="app.js?v=31"></script>
 </body>
 </html>

@@ -35,6 +35,165 @@ let currentRawSummary = "";
 let currentSources = [];
 let abortController = null;
 
+// =========================================================================
+// Bring-your-own-key settings — stored only in this browser
+// =========================================================================
+const LLM_STORAGE_KEY = "ara.llm";
+const FALLBACK_PROVIDERS = [
+    { id: "openrouter", name: "OpenRouter", default_model: "openai/gpt-oss-120b:free", key_url: "https://openrouter.ai/keys" },
+    { id: "groq", name: "Groq", default_model: "llama-3.3-70b-versatile", key_url: "https://console.groq.com/keys" },
+    { id: "openai", name: "OpenAI", default_model: "gpt-4o-mini", key_url: "https://platform.openai.com/api-keys" },
+    { id: "custom", name: "Custom (OpenAI-compatible)", default_model: "", key_url: "" },
+];
+
+const settingsBtn = document.getElementById("settings-btn");
+const modelBadgeText = document.getElementById("model-badge-text");
+const settingsDialog = document.getElementById("settings-dialog");
+const settingsForm = document.getElementById("settings-form");
+const settingsError = document.getElementById("settings-error");
+const llmProvider = document.getElementById("llm-provider");
+const llmKey = document.getElementById("llm-key");
+const llmKeyToggle = document.getElementById("llm-key-toggle");
+const llmKeyLink = document.getElementById("llm-key-link");
+const llmModel = document.getElementById("llm-model");
+const llmBaseRow = document.getElementById("llm-base-row");
+const llmBaseUrl = document.getElementById("llm-base-url");
+const llmRemember = document.getElementById("llm-remember");
+const noticeBar = document.getElementById("notice-bar");
+const noticeText = document.getElementById("notice-text");
+
+let providers = FALLBACK_PROVIDERS;
+
+function storageGet(storage) {
+    try { return JSON.parse(storage.getItem(LLM_STORAGE_KEY) || "null"); } catch (_) { return null; }
+}
+
+/** The saved user model settings, or null to use the server models. */
+function loadUserLLM() {
+    return storageGet(localStorage) || storageGet(sessionStorage);
+}
+
+function saveUserLLM(llm, remember) {
+    try {
+        localStorage.removeItem(LLM_STORAGE_KEY);
+        sessionStorage.removeItem(LLM_STORAGE_KEY);
+        if (llm) (remember ? localStorage : sessionStorage).setItem(LLM_STORAGE_KEY, JSON.stringify(llm));
+    } catch (_) { /* storage blocked — settings last for this page only */ }
+    sessionLLM = llm;
+}
+
+let sessionLLM = loadUserLLM();
+
+function providerById(id) {
+    return providers.find((p) => p.id === id) || providers[0];
+}
+
+function updateModelBadge() {
+    if (sessionLLM) {
+        const p = providerById(sessionLLM.provider);
+        modelBadgeText.textContent = `Your ${p.name.replace(/ \(.*\)$/, "")} key`;
+        settingsBtn.classList.add("is-custom");
+    } else {
+        modelBadgeText.textContent = "Server models";
+        settingsBtn.classList.remove("is-custom");
+    }
+}
+
+function syncProviderFields() {
+    const p = providerById(llmProvider.value);
+    llmModel.placeholder = p.default_model ? `Default: ${p.default_model}` : "Model name, e.g. llama3-70b";
+    llmBaseRow.classList.toggle("hidden", p.id !== "custom");
+    llmKeyLink.classList.toggle("hidden", !p.key_url);
+    if (p.key_url) {
+        llmKeyLink.href = p.key_url;
+        llmKeyLink.textContent = `Get a ${p.name} key ↗`;
+    }
+}
+
+async function loadProviders() {
+    try {
+        const res = await fetch(`${API_BASE}/providers`);
+        if (res.ok) providers = await res.json();
+    } catch (_) { /* keep the built-in list */ }
+    llmProvider.innerHTML = "";
+    providers.forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name;
+        llmProvider.appendChild(opt);
+    });
+    updateModelBadge();
+}
+
+function openSettings() {
+    const llm = sessionLLM;
+    llmProvider.value = llm ? llm.provider : providers[0].id;
+    llmKey.value = llm ? llm.api_key : "";
+    llmModel.value = llm ? llm.model || "" : "";
+    llmBaseUrl.value = llm ? llm.base_url || "" : "";
+    llmRemember.checked = !!storageGet(localStorage);
+    llmKey.type = "password";
+    llmKeyToggle.textContent = "Show";
+    settingsError.classList.add("hidden");
+    syncProviderFields();
+    settingsDialog.showModal();
+    llmKey.focus();
+}
+
+function showSettingsError(msg) {
+    settingsError.textContent = msg;
+    settingsError.classList.remove("hidden");
+}
+
+settingsBtn.addEventListener("click", openSettings);
+llmProvider.addEventListener("change", syncProviderFields);
+document.getElementById("llm-cancel").addEventListener("click", () => settingsDialog.close());
+llmKeyToggle.addEventListener("click", () => {
+    const hidden = llmKey.type === "password";
+    llmKey.type = hidden ? "text" : "password";
+    llmKeyToggle.textContent = hidden ? "Hide" : "Show";
+});
+
+document.getElementById("llm-clear").addEventListener("click", () => {
+    saveUserLLM(null, false);
+    updateModelBadge();
+    settingsDialog.close();
+});
+
+settingsForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const key = llmKey.value.trim();
+    const provider = llmProvider.value;
+    const model = llmModel.value.trim();
+    const baseUrl = llmBaseUrl.value.trim();
+
+    if (!key) return showSettingsError("Paste an API key, or use “Remove key” to go back to the server models.");
+    if (/\s/.test(key) || key.length < 8) return showSettingsError("That API key does not look valid.");
+    if (provider === "custom") {
+        if (!/^https:\/\//i.test(baseUrl)) return showSettingsError("A custom provider needs an https:// base URL.");
+        if (!model) return showSettingsError("A custom provider needs a model name.");
+    }
+
+    const llm = { provider, api_key: key, model };
+    if (provider === "custom") llm.base_url = baseUrl;
+    saveUserLLM(llm, llmRemember.checked);
+    updateModelBadge();
+    settingsDialog.close();
+});
+
+function showNotice(msg) {
+    noticeText.textContent = msg;
+    noticeBar.classList.remove("hidden");
+}
+
+function hideNotice() {
+    noticeBar.classList.add("hidden");
+    noticeText.textContent = "";
+}
+
+document.getElementById("notice-dismiss").addEventListener("click", hideNotice);
+loadProviders();
+
 // --- Character Counter ---
 topicInput.addEventListener("input", () => {
     const len = topicInput.value.length;
@@ -68,6 +227,7 @@ researchBtn.addEventListener("click", async () => {
     currentSources = [];
     showLoading(true);
     hideError();
+    hideNotice();
     hideResults();
     setBusy(true);
 
@@ -77,7 +237,7 @@ researchBtn.addEventListener("click", async () => {
         const res = await fetch(`${API_BASE}/research`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ topic }),
+            body: JSON.stringify(sessionLLM ? { topic, llm: sessionLLM } : { topic }),
             signal: abortController.signal,
         });
 
@@ -151,6 +311,10 @@ function handleStreamEvent(payload) {
             }
             currentRawSummary += payload.text;
             summaryContent.innerHTML = renderRichContent(currentRawSummary) + '<span class="typing-cursor"></span>';
+            break;
+
+        case "notice":
+            showNotice(payload.message);
             break;
 
         case "reset":

@@ -1,6 +1,6 @@
 """
 HTTP route definitions — validates input, calls agent/exporter, returns response.
-Routes: POST /research (SSE stream), POST /export, GET /health.
+Routes: POST /research (SSE stream), POST /export, GET /providers, GET /health.
 Business logic stays in agent.py and exporter.py.
 """
 
@@ -9,6 +9,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from backend.agent import get_model_chain, run_research_workflow
 from backend.exporter import export_pdf, export_txt
+from backend.providers import PROVIDERS
 from backend.utils import ExportRequest, ResearchRequest, logger
 
 router = APIRouter()
@@ -22,12 +23,21 @@ async def health() -> dict[str, object]:
     return {"status": "ok", "models": [m.model for m in get_model_chain()]}
 
 
+@router.get("/providers")
+async def providers() -> list[dict[str, str]]:
+    """Providers a visitor can choose for "bring your own key"."""
+    return [
+        {"id": p.id, "name": p.name, "default_model": p.default_model, "key_url": p.key_url}
+        for p in PROVIDERS.values()
+    ]
+
+
 @router.post("/research")
 async def research(request: ResearchRequest) -> StreamingResponse:
     """Accept a research topic and stream a cited AI summary as Server-Sent Events."""
     logger.info(f"Research request received for topic: {request.topic}")
     return StreamingResponse(
-        run_research_workflow(request.topic),
+        run_research_workflow(request.topic, request.llm),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

@@ -155,7 +155,98 @@ body {
 .app-header {
     margin-bottom: 48px;
     animation: fadeInDown 600ms ease-out;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
 }
+
+/* --- Model badge / settings button --- */
+.model-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: rgba(30, 30, 45, 0.7);
+    color: var(--text-secondary);
+    font: 500 0.8rem var(--font-family);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.model-badge:hover { border-color: var(--border-glow); color: var(--text-primary); }
+.model-badge.is-custom { border-color: rgba(52, 211, 153, 0.45); color: var(--accent-emerald); }
+.model-badge svg { flex-shrink: 0; }
+
+/* --- Notice bar --- */
+.notice-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    background: rgba(245, 158, 11, 0.08);
+    color: #fcd34d;
+    font-size: 0.875rem;
+}
+
+.notice-bar span { flex: 1; }
+.notice-close {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 1.2rem;
+    cursor: pointer;
+    line-height: 1;
+}
+
+/* --- Settings dialog --- */
+.settings-dialog {
+    margin: auto;
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: #141627;
+    color: var(--text-primary);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.settings-dialog::backdrop { background: rgba(2, 6, 23, 0.7); backdrop-filter: blur(4px); }
+.settings-form { display: flex; flex-direction: column; gap: 16px; padding: 28px; }
+.settings-title { font-size: 1.15rem; font-weight: 700; }
+.settings-intro, .settings-privacy { font-size: 0.85rem; color: var(--text-muted); line-height: 1.55; }
+.settings-privacy { padding: 10px 12px; border-radius: var(--radius-sm); background: rgba(52, 211, 153, 0.06); border: 1px solid rgba(52, 211, 153, 0.2); }
+.settings-error { font-size: 0.85rem; color: var(--accent-rose); }
+.settings-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.settings-spacer { flex: 1; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
+.field-optional { font-weight: 400; color: var(--text-muted); }
+.field-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary);
+    font: 0.9rem var(--font-family);
+}
+.field-input:focus { outline: none; border-color: var(--accent-indigo); box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.15); }
+select.field-input option { background: #141627; }
+.key-row { display: flex; gap: 8px; }
+.field-hint-link { font-size: 0.8rem; color: var(--accent-blue); text-decoration: none; align-self: flex-start; }
+.field-hint-link:hover { text-decoration: underline; }
+.field-check { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; color: var(--text-secondary); cursor: pointer; }
+.field-check input { accent-color: var(--accent-indigo); width: 16px; height: 16px; }
+.btn-small { padding: 8px 14px; }
 
 .logo-group {
     display: flex;

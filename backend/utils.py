@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, field_validator
 
+from backend.providers import UserLLM
+
 # --- Logging setup ---
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +26,7 @@ MAX_EXPORT_CHARS: int = 200_000
 class ResearchRequest(BaseModel):
     """Request body for POST /research."""
     topic: str
+    llm: UserLLM | None = None   # optional "bring your own key" settings
 
     @field_validator("topic")
     @classmethod

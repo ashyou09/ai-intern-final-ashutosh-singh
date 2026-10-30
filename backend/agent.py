@@ -15,6 +15,7 @@ SSE events (all JSON in `data:` lines):
   status  {stage: search|analyze|write, message}
   content {text}
   reset   {message}        — discard streamed text, a fallback model is starting
+  notice  {message}        — non-fatal info, e.g. the user's own API key failed
   done    {sources, model, topic}
   error   {message}
 """
@@ -23,51 +24,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any
 
-from groq import AsyncGroq
-from openai import AsyncOpenAI
-
 from backend.config import settings
+from backend.pages import is_safe_url
 from backend.prompts import RESEARCH_SYSTEM_PROMPT, build_user_prompt
+from backend.providers import ModelOption, UserLLM, describe_error, server_model_chain
 from backend.search import Source, build_sources_markdown, format_context, gather_sources
 from backend.utils import logger
 
-OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-
-
-@dataclass(frozen=True)
-class ModelOption:
-    provider: str
-    model: str
-    client: Any
-
-
-def _key_is_set(key: str) -> bool:
-    return bool(key) and not key.startswith("your-")
-
-
-@lru_cache(maxsize=1)
-def _openrouter_client() -> AsyncOpenAI:
-    return AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=settings.openrouter_api_key)
-
-
-@lru_cache(maxsize=1)
-def _groq_client() -> AsyncGroq:
-    return AsyncGroq(api_key=settings.groq_api_key)
-
-
-def get_model_chain() -> list[ModelOption]:
-    """Return the configured models in fallback order. Clients are reused across requests."""
-    chain: list[ModelOption] = []
-    if _key_is_set(settings.openrouter_api_key):
-        chain.append(ModelOption("OpenRouter", settings.primary_model, _openrouter_client()))
-    if _key_is_set(settings.groq_api_key):
-        chain.append(ModelOption("Groq", settings.fallback_model, _groq_client()))
-        chain.append(ModelOption("Groq", settings.fallback_model_2, _groq_client()))
-    return chain
+# Server-configured models (module-level name so tests can replace it)
+get_model_chain = server_model_chain
 
 
 def sse(event_type: str, **data: Any) -> str:
@@ -75,7 +42,22 @@ def sse(event_type: str, **data: Any) -> str:
     return f"data: {json.dumps({'type': event_type, **data})}\n\n"
 
 
-async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
+async def build_chain(user_llm: UserLLM | None) -> tuple[list[ModelOption], str | None]:
+    """
+    The visitor's own model (if any) first, then the server models.
+    Returns the chain and an optional notice for the user.
+    """
+    chain: list[ModelOption] = []
+    notice: str | None = None
+    if user_llm is not None:
+        if user_llm.provider == "custom" and not await is_safe_url(user_llm.base_url):
+            notice = "Your custom base URL is not a public https address, so it was skipped."
+        else:
+            chain.append(user_llm.to_option())
+    return chain + get_model_chain(), notice
+
+
+async def run_research_workflow(topic: str, user_llm: UserLLM | None = None) -> AsyncGenerator[str, None]:
     """Gather sources, then stream the model's summary as SSE events."""
     yield sse("status", stage="search", message="Searching the web and academic databases...")
 
@@ -93,9 +75,12 @@ async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
         {"role": "user", "content": build_user_prompt(topic, format_context(sources))},
     ]
 
-    chain: list[ModelOption] = get_model_chain()
+    chain, notice = await build_chain(user_llm)
+    if notice:
+        yield sse("notice", message=notice)
     if not chain:
-        yield sse("error", message="No AI model is configured. Set OPENROUTER_API_KEY or GROQ_API_KEY.")
+        yield sse("error", message="No AI model is available. Add your own API key in Settings, "
+                                   "or set OPENROUTER_API_KEY / GROQ_API_KEY on the server.")
         return
 
     for option in chain:
@@ -118,7 +103,10 @@ async def run_research_workflow(topic: str) -> AsyncGenerator[str, None]:
                 raise RuntimeError("model returned an empty response")
 
         except Exception as e:
-            logger.warning(f"{option.provider} model {option.model} failed: {e}")
+            logger.warning(f"{option.provider} model {option.model} failed: {describe_error(e)}")
+            if option.user_supplied:
+                fallback = "using the server's models instead" if len(chain) > 1 else "no other model is available"
+                yield sse("notice", message=f"Your {option.provider} model failed: {describe_error(e)}; {fallback}.")
             if streamed_any:
                 yield sse("reset", message="The model stopped mid-answer; retrying with a fallback model.")
             continue
