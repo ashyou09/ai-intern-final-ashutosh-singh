@@ -4,12 +4,13 @@ Routes: POST /research (SSE stream), POST /export, GET /providers, GET /health.
 Business logic stays in agent.py and exporter.py.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response, StreamingResponse
 
 from backend.agent import get_model_chain, run_research_workflow
 from backend.exporter import export_pdf, export_txt
 from backend.providers import PROVIDERS
+from backend.ratelimit import research_rate_limit
 from backend.utils import ExportRequest, ResearchRequest, logger
 
 router = APIRouter()
@@ -32,7 +33,7 @@ async def providers() -> list[dict[str, str]]:
     ]
 
 
-@router.post("/research")
+@router.post("/research", dependencies=[Depends(research_rate_limit)])
 async def research(request: ResearchRequest) -> StreamingResponse:
     """Accept a research topic and stream a cited AI summary as Server-Sent Events."""
     logger.info(f"Research request received for topic: {request.topic}")

@@ -11,12 +11,14 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.config import settings
 from backend.errors import (
     ExportError,
     export_error_handler,
     generic_error_handler,
+    http_error_handler,
     validation_error_handler,
 )
 from backend.routes import router
@@ -38,6 +40,7 @@ app.add_middleware(
 )
 
 app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.add_exception_handler(StarletteHTTPException, http_error_handler)
 app.add_exception_handler(ExportError, export_error_handler)
 app.add_exception_handler(Exception, generic_error_handler)
 

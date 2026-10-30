@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     http_timeout: float = 15.0
     mcp_timeout: int = 30
 
+    # Rate limits for POST /research, per client IP (0 = unlimited)
+    rate_limit_per_minute: int = 5
+    rate_limit_per_hour: int = 40
+    trust_proxy: bool = False     # use X-Forwarded-For for the client IP (set when behind a proxy)
+    vercel: str = ""              # set automatically by Vercel; implies trust_proxy
+
     # Comma-separated list of allowed origins, e.g. "https://myapp.vercel.app"
     cors_origins: str = "*"
 

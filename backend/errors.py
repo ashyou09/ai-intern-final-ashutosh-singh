@@ -4,7 +4,7 @@ Every user-facing error uses the same shape: {"error": "<message>"}.
 Never expose raw stack traces.
 """
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -25,6 +25,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         # Pydantic prefixes custom validator messages with "Value error, "
         message = str(errors[0].get("msg", message)).removeprefix("Value error, ")
     return JSONResponse(status_code=422, content={"error": message})
+
+
+async def http_error_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """HTTPExceptions (404, 429, ...) use the same {"error": ...} shape as every other error."""
+    return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)}, headers=exc.headers)
 
 
 async def export_error_handler(request: Request, exc: ExportError) -> JSONResponse:
