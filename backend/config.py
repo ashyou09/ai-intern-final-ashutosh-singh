@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     max_tokens: int = 2000
 
     # Search
+    plan_queries: bool = True     # let the model split the topic into focused sub-queries
+    max_subqueries: int = 3
     web_results: int = 6
     paper_results: int = 4
     snippet_chars: int = 400

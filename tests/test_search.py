@@ -148,3 +148,28 @@ def test_web_search_uses_mcp_result(monkeypatch):
                         lambda **kw: '[{"title": "Error handling in Rust", "url": "https://r.com", "snippet": "s"}]')
     results = search.web_search("q", 3)
     assert [r.title for r in results] == ["Error handling in Rust"]
+
+
+def test_gather_sources_searches_every_query_and_interleaves(monkeypatch):
+    calls = []
+
+    def fake_web(query, n):
+        calls.append((query, n))
+        return [Source(f"{query}-{i}", f"https://{query.replace(' ', '')}.com/{i}", "", "web") for i in range(n)]
+
+    async def fake_papers(query, n):
+        return [Source("paper", "https://arxiv.org/1", "", "paper")]
+
+    async def no_pages(sources):
+        return 0
+
+    monkeypatch.setattr(search, "web_search", fake_web)
+    monkeypatch.setattr(search, "academic_search", fake_papers)
+    monkeypatch.setattr(search, "read_top_pages", no_pages)
+    monkeypatch.setattr(search.settings, "web_results", 6)
+
+    sources = asyncio.run(search.gather_sources("topic", ["sub one", "TOPIC"]))
+    assert [q for q, _ in calls] == ["topic", "sub one"]          # duplicate of the topic is skipped
+    assert [s.title for s in sources[:4]] == ["topic-0", "sub one-0", "topic-1", "sub one-1"]
+    assert sources[-1].kind == "paper"
+    assert [s.id for s in sources] == list(range(1, len(sources) + 1))

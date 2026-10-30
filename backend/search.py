@@ -251,13 +251,22 @@ def number_sources(sources: list[Source]) -> list[Source]:
     return unique
 
 
-async def gather_sources(topic: str) -> list[Source]:
-    """Run web and academic search concurrently, number the sources, read the top pages."""
-    web, papers = await asyncio.gather(
-        asyncio.to_thread(web_search, topic, settings.web_results),
+async def gather_sources(topic: str, queries: list[str] | None = None) -> list[Source]:
+    """
+    Search the web for the topic and every sub-query, plus academic papers,
+    all concurrently. Results are interleaved (best result of each query
+    first), numbered, and the top pages are read.
+    """
+    queries = [topic] + [q for q in (queries or []) if q.lower() != topic.lower()]
+    per_query: int = max(2, -(-settings.web_results // len(queries)))  # ceil division
+
+    *web_lists, papers = await asyncio.gather(
+        *(asyncio.to_thread(web_search, q, per_query) for q in queries),
         academic_search(topic, settings.paper_results),
     )
-    sources = number_sources(web + papers)
+    web: list[Source] = [s for group in _zip_longest(list(web_lists)) for s in group]
+    sources = number_sources(web)[:settings.web_results + 2] + papers
+    sources = number_sources(sources)
     await read_top_pages(sources)
     return sources
 

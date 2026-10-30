@@ -41,7 +41,7 @@ def _run(topic="topic"):
 
 @pytest.fixture(autouse=True)
 def fake_sources(monkeypatch):
-    async def gather(topic):
+    async def gather(topic, queries=None):
         return number_sources([Source("Web A", "https://a.com", "s", "web")])
     monkeypatch.setattr(agent, "gather_sources", gather)
 
@@ -104,7 +104,7 @@ def test_no_models_configured(monkeypatch):
 
 
 def test_search_failure_still_produces_summary(monkeypatch):
-    async def broken(topic):
+    async def broken(topic, queries=None):
         raise RuntimeError("network down")
     monkeypatch.setattr(agent, "gather_sources", broken)
     monkeypatch.setattr(agent, "get_model_chain", lambda: [_model("m1", FakeStream(["text"]))])
@@ -118,3 +118,60 @@ def test_model_chain_skips_placeholder_keys(monkeypatch):
     monkeypatch.setattr(agent.settings, "groq_api_key", "gsk_real")
     chain = agent.get_model_chain()
     assert [m.provider for m in chain] == ["Groq", "Groq"]
+
+
+# --- query planning ---
+
+class _PlannerClient:
+    """Returns a planner reply for non-streaming calls and a stream otherwise."""
+
+    def __init__(self, plan_reply):
+        self.plan_reply = plan_reply
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    async def create(self, **kwargs):
+        if kwargs.get("stream"):
+            return FakeStream(["summary"])
+        message = SimpleNamespace(content=self.plan_reply)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+def test_planned_queries_are_announced_and_searched(monkeypatch):
+    seen = {}
+
+    async def gather(topic, queries=None):
+        seen["queries"] = queries
+        return []
+    monkeypatch.setattr(agent, "gather_sources", gather)
+    reply = 'Sure! ["quantum error correction", "quantum computing applications", "Quantum Error Correction"]'
+    monkeypatch.setattr(agent, "get_model_chain", lambda: [agent.ModelOption("P", "m", _PlannerClient(reply))])
+
+    events = _run("quantum computing")
+    plan = [e for e in events if e["type"] == "plan"]
+    assert plan == [{"type": "plan", "queries": ["quantum error correction", "quantum computing applications"]}]
+    assert seen["queries"] == plan[0]["queries"]
+    assert [e["stage"] for e in events if e["type"] == "status"] == ["plan", "search", "analyze", "write"]
+
+
+def test_unparseable_plan_falls_back_to_topic(monkeypatch):
+    monkeypatch.setattr(agent, "get_model_chain", lambda: [agent.ModelOption("P", "m", _PlannerClient("no json"))])
+    events = _run()
+    assert not any(e["type"] == "plan" for e in events)
+    assert events[-1]["type"] == "done"
+
+
+def test_planning_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(agent.settings, "plan_queries", False)
+    client = _PlannerClient('["a b c"]')
+    monkeypatch.setattr(agent, "get_model_chain", lambda: [agent.ModelOption("P", "m", client)])
+    assert not any(e["type"] == "plan" for e in _run())
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('["a", "b"]', ["a", "b"]),
+    ('Here you go:\n```json\n["x  y", 3, "z"]\n```', ["x y", "z"]),
+    ("[not json]", []),
+    ("", []),
+])
+def test_parse_queries(text, expected):
+    assert agent.parse_queries(text, 3) == expected

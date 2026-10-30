@@ -42,6 +42,17 @@ MATH FORMATTING:
 """
 
 
+PLANNER_PROMPT = """\
+You plan web searches for a research assistant.
+Given a research topic, write {n} short, distinct search queries that together cover
+the topic's most important angles (e.g. definition/background, recent developments,
+challenges or criticism, applications). Each query must be 3-10 words.
+
+Reply with ONLY a JSON array of strings, for example:
+["query one", "query two", "query three"]
+"""
+
+
 def build_user_prompt(topic: str, context: str) -> str:
     """User message containing the topic and the numbered search results."""
     return (

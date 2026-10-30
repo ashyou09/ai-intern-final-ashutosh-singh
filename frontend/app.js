@@ -25,7 +25,10 @@ const stopBtn = document.getElementById("stop-btn");
 const mainLogo = document.getElementById("main-logo");
 
 // Loading step elements
+const stepPlan = document.getElementById("step-plan");
 const stepSearch = document.getElementById("step-search");
+const loadingText = document.getElementById("loading-text");
+const planQueries = document.getElementById("plan-queries");
 const stepAnalyze = document.getElementById("step-analyze");
 const stepWrite = document.getElementById("step-write");
 
@@ -302,6 +305,11 @@ function handleStreamEvent(payload) {
     switch (payload.type) {
         case "status":
             setStage(payload.stage);
+            if (payload.message) loadingText.textContent = payload.message;
+            break;
+
+        case "plan":
+            renderPlan(payload.queries || []);
             break;
 
         case "content":
@@ -357,9 +365,20 @@ function setBusy(busy) {
     stopBtn.classList.toggle("hidden", !busy);
 }
 
+function renderPlan(queries) {
+    planQueries.innerHTML = "";
+    queries.forEach((q) => {
+        const chip = document.createElement("span");
+        chip.className = "plan-chip";
+        chip.textContent = q;
+        planQueries.appendChild(chip);
+    });
+    planQueries.classList.toggle("hidden", queries.length === 0);
+}
+
 function setStage(stage) {
-    const order = [stepSearch, stepAnalyze, stepWrite];
-    const index = { search: 0, analyze: 1, write: 2 }[stage];
+    const order = [stepPlan, stepSearch, stepAnalyze, stepWrite];
+    const index = { plan: 0, search: 1, analyze: 2, write: 3 }[stage];
     if (index === undefined) return;
     order.forEach((step, i) => {
         step.classList.toggle("done", i < index);
@@ -700,11 +719,12 @@ function hideResults() {
 
 // --- Loading Step Animation ---
 function startLoadingSteps() {
-    [stepSearch, stepAnalyze, stepWrite].forEach((s) => {
+    [stepPlan, stepSearch, stepAnalyze, stepWrite].forEach((s) => {
         s.classList.remove("active", "done");
     });
+    renderPlan([]);
     // Steps advance as the backend sends `status` events (see setStage)
-    stepSearch.classList.add("active");
+    stepPlan.classList.add("active");
 }
 
 // --- Background Laser & Particle Effects ---

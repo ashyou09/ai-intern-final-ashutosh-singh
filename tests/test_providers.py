@@ -91,7 +91,7 @@ def _events(user_llm):
 
 @pytest.fixture(autouse=True)
 def no_search(monkeypatch):
-    async def gather(topic):
+    async def gather(topic, queries=None):
         return number_sources([Source("A", "https://a.com", "", "web")])
     monkeypatch.setattr(agent, "gather_sources", gather)
 

@@ -977,3 +977,22 @@ select.field-input option { background: #141627; }
     .orb-2 { width: 250px; height: 250px; }
     .orb-3 { width: 200px; height: 200px; }
 }
+
+/* --- Planned search queries (loading card) --- */
+.plan-queries {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin: -8px 0 24px;
+}
+
+.plan-chip {
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: rgba(129, 140, 248, 0.1);
+    border: 1px solid rgba(129, 140, 248, 0.25);
+    animation: fadeInUp 400ms ease-out both;
+}

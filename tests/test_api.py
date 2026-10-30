@@ -29,7 +29,7 @@ def test_research_rejects_long_topic(client):
 
 
 def test_research_streams_sse(client, monkeypatch):
-    async def gather(topic):
+    async def gather(topic, queries=None):
         return number_sources([Source("A", "https://a.com", "", "web")])
     monkeypatch.setattr(agent, "gather_sources", gather)
     monkeypatch.setattr(agent, "get_model_chain", lambda: [])
@@ -38,8 +38,7 @@ def test_research_streams_sse(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     events = [json.loads(line[6:]) for line in resp.text.split("\n\n") if line.startswith("data: ")]
-    assert events[0]["stage"] == "search"
-    assert events[-1]["type"] == "error"
+    assert events == [{"type": "error", "message": events[0]["message"]}]   # no model → fail fast, no search
 
 
 def test_export_txt(client):

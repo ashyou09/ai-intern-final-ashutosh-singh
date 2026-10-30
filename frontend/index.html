@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=16">
+    <link rel="stylesheet" href="style.css?v=17">
     
     <!-- MathJax for rendering LaTeX/Math -->
     <script>
@@ -111,11 +111,16 @@
                     <div class="pulse-core"></div>
                 </div>
                 <h3 class="loading-title">Researching your topic...</h3>
-                <p class="loading-text">Searching the web and academic databases, then writing a cited summary. This may take 15-30 seconds.</p>
+                <p class="loading-text" id="loading-text">Planning searches, reading sources, then writing a cited summary. This may take 20-40 seconds.</p>
+                <div id="plan-queries" class="plan-queries hidden" aria-label="Planned searches"></div>
                 <div class="loading-steps">
-                    <div class="step active" id="step-search">
+                    <div class="step active" id="step-plan">
                         <div class="step-dot"></div>
-                        <span>Searching the web</span>
+                        <span>Planning searches</span>
+                    </div>
+                    <div class="step" id="step-search">
+                        <div class="step-dot"></div>
+                        <span>Searching &amp; reading</span>
                     </div>
                     <div class="step" id="step-analyze">
                         <div class="step-dot"></div>
@@ -263,6 +268,6 @@
         </footer>
     </div>
 
-    <script src="app.js?v=31"></script>
+    <script src="app.js?v=32"></script>
 </body>
 </html>
