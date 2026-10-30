@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=18">
+    <link rel="stylesheet" href="style.css?v=19">
     
     <!-- MathJax for rendering LaTeX/Math -->
     <script>
@@ -224,6 +224,21 @@
             </button>
         </section>
 
+        <!-- Research history (stored in this browser) -->
+        <section id="history-section" class="history-section hidden" aria-labelledby="history-title">
+            <div class="history-header">
+                <h3 id="history-title" class="history-title">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    Recent research
+                </h3>
+                <button id="history-clear" class="link-btn" type="button">Clear all</button>
+            </div>
+            <ul id="history-list" class="history-list"></ul>
+        </section>
+
         <!-- Settings: bring your own API key -->
         <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
             <form id="settings-form" class="settings-form" novalidate>
@@ -283,6 +298,6 @@
         </footer>
     </div>
 
-    <script src="app.js?v=33"></script>
+    <script src="app.js?v=34"></script>
 </body>
 </html>

@@ -336,6 +336,12 @@ function handleStreamEvent(payload) {
         case "done":
             currentSources = payload.sources || [];
             finishRender();
+            addToHistory({
+                topic: currentTopic,
+                summary: currentRawSummary,
+                sources: currentSources,
+                model: payload.model,
+            });
             setTimeout(() => {
                 resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
             }, 100);
@@ -706,6 +712,110 @@ newResearchBtn.addEventListener("click", () => {
         block: "start",
     });
 });
+
+// =========================================================================
+// Research history — the last reports, stored only in this browser
+// =========================================================================
+const HISTORY_KEY = "ara.history";
+const HISTORY_LIMIT = 20;
+const historySection = document.getElementById("history-section");
+const historyList = document.getElementById("history-list");
+
+function loadHistory() {
+    try {
+        const items = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+        return Array.isArray(items) ? items : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function saveHistory(items) {
+    try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+    } catch (_) {
+        // Storage full or blocked: drop the oldest half and try once more
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, Math.ceil(items.length / 2)))); } catch (_) {}
+    }
+}
+
+function addToHistory(entry) {
+    if (!entry.summary || !entry.summary.trim()) return;
+    const key = entry.topic.toLowerCase();
+    const items = loadHistory().filter((item) => item.topic.toLowerCase() !== key);
+    items.unshift({ id: Date.now().toString(36), date: new Date().toISOString(), ...entry });
+    saveHistory(items.slice(0, HISTORY_LIMIT));
+    renderHistory();
+}
+
+function formatDate(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    return sameDay
+        ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+function renderHistory() {
+    const items = loadHistory();
+    historyList.innerHTML = "";
+    items.forEach((item) => {
+        const li = document.createElement("li");
+        li.className = "history-item";
+
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "history-open";
+        open.title = `Open “${item.topic}”`;
+        const topic = document.createElement("span");
+        topic.className = "history-topic";
+        topic.textContent = item.topic;
+        const meta = document.createElement("span");
+        meta.className = "history-meta";
+        meta.textContent = [formatDate(item.date), `${(item.sources || []).length} sources`].filter(Boolean).join(" · ");
+        open.append(topic, meta);
+        open.addEventListener("click", () => openHistoryItem(item.id));
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "history-delete";
+        del.setAttribute("aria-label", `Delete “${item.topic}” from history`);
+        del.textContent = "×";
+        del.addEventListener("click", () => {
+            saveHistory(loadHistory().filter((x) => x.id !== item.id));
+            renderHistory();
+        });
+
+        li.append(open, del);
+        historyList.appendChild(li);
+    });
+    historySection.classList.toggle("hidden", items.length === 0);
+}
+
+function openHistoryItem(id) {
+    const item = loadHistory().find((x) => x.id === id);
+    if (!item || abortController) return;
+    hideError();
+    hideNotice();
+    currentTopic = item.topic;
+    currentRawSummary = item.summary;
+    currentSources = item.sources || [];
+    topicInput.value = item.topic;
+    charCount.textContent = item.topic.length;
+    resultsTopic.textContent = item.topic;
+    finishRender();
+    resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.getElementById("history-clear").addEventListener("click", () => {
+    if (!confirm("Clear all saved research from this browser?")) return;
+    saveHistory([]);
+    renderHistory();
+});
+
+renderHistory();
 
 // --- Error Dismiss ---
 errorDismiss.addEventListener("click", hideError);

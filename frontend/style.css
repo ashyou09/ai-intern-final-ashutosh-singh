@@ -997,3 +997,91 @@ select.field-input option { background: #141627; }
     border: 1px solid rgba(129, 140, 248, 0.25);
     animation: fadeInUp 400ms ease-out both;
 }
+
+/* --- Research history --- */
+.history-section {
+    margin-top: 32px;
+    animation: fadeInUp 500ms ease-out;
+}
+
+.history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.history-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.link-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font: 500 0.8rem var(--font-family);
+    cursor: pointer;
+}
+
+.link-btn:hover { color: var(--accent-rose); }
+
+.history-list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
+}
+
+.history-item {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: rgba(30, 30, 45, 0.7);
+    transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.history-item:hover { border-color: var(--border-glow); transform: translateY(-1px); }
+
+.history-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    background: none;
+    border: none;
+    text-align: left;
+    color: inherit;
+    font-family: var(--font-family);
+    cursor: pointer;
+}
+
+.history-topic {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.history-meta { font-size: 0.75rem; color: var(--text-muted); }
+
+.history-delete {
+    padding: 0 12px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    opacity: 0.6;
+}
+
+.history-delete:hover { color: var(--accent-rose); opacity: 1; }
