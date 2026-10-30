@@ -9,9 +9,9 @@ Test with:       mcp dev mcp_servers/web_search_server.py
 
 import json
 
+from ddgs import DDGS
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from ddgs import DDGS
 
 mcp = FastMCP("WebSearchMCP", log_level="ERROR")
 

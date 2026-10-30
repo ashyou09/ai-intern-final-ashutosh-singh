@@ -18,7 +18,7 @@ import asyncio
 import json
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 import httpx
@@ -204,7 +204,7 @@ async def academic_search(query: str, num_results: int = 4) -> list[Source]:
         )
 
     lists: list[list[Source]] = []
-    for name, result in zip(("arXiv", "Semantic Scholar"), results):
+    for name, result in zip(("arXiv", "Semantic Scholar"), results, strict=True):
         if isinstance(result, BaseException):
             logger.warning(f"{name} search failed: {result}")
         else:

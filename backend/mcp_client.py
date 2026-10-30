@@ -15,9 +15,9 @@ works no matter which directory it is started from.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
-import os
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters, types

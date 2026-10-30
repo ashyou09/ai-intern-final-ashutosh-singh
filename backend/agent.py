@@ -22,9 +22,10 @@ SSE events (all JSON in `data:` lines):
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from groq import AsyncGroq
 from openai import AsyncOpenAI

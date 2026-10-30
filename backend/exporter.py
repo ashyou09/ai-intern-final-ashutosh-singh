@@ -21,7 +21,7 @@ def _sanitize_latex(text: str) -> str:
     # Strip MathJax block/inline delimiters
     text = re.sub(r'\\\[|\\\]|\\\(|\\\)', '', text)
     text = re.sub(r'\$\$?', '', text)
-    
+
     # --- Multi-argument LaTeX functions (handle nested braces) ---
     # \binom{n}{k} → C(n, k)
     text = re.sub(r'\\binom\{([^}]*)\}\{([^}]*)\}', r'C(\1, \2)', text)
@@ -29,7 +29,7 @@ def _sanitize_latex(text: str) -> str:
     text = re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', text)
     # \sqrt{x} → sqrt(x)
     text = re.sub(r'\\sqrt\{([^}]*)\}', r'sqrt(\1)', text)
-    
+
     # --- Sum/Product with limits ---
     # \sum_{a}^{b} → Sum(a to b)
     text = re.sub(r'\\sum_\{([^}]*)\}\^\{([^}]*)\}', r'Sum(\1 to \2)', text)
@@ -46,7 +46,7 @@ def _sanitize_latex(text: str) -> str:
     text = re.sub(r'\\text\{([^}]*)\}', r'\1', text)
     # \sim → ~
     text = text.replace('\\sim', '~')
-    
+
     # --- Named LaTeX symbols → plaintext ---
     latex_symbols = {
         '\\displaystyle': '', '\\quad': ' ', '\\qquad': '  ',
@@ -67,7 +67,7 @@ def _sanitize_latex(text: str) -> str:
     }
     for k, v in latex_symbols.items():
         text = text.replace(k, v)
-    
+
     # --- Superscript/subscript brace cleanup ---
     # x^{n-k} → x^(n-k)  and  x^{n} → x^n
     def _clean_brace_group(match):
@@ -78,14 +78,14 @@ def _sanitize_latex(text: str) -> str:
         return f"{prefix}({content})"     # x^(n-k)
     text = re.sub(r'(\^)\{([^}]*)\}', _clean_brace_group, text)
     text = re.sub(r'(_)\{([^}]*)\}', _clean_brace_group, text)
-    
+
     # --- Catch any remaining \command patterns and strip the backslash ---
     text = re.sub(r'\\([a-zA-Z]+)', r'\1', text)
-    
+
     # --- Clean up stray braces and extra whitespace ---
     text = text.replace('{', '').replace('}', '')
     text = re.sub(r' {2,}', ' ', text).strip()
-    
+
     return text
 
 
@@ -94,7 +94,7 @@ def _clean_text(text: str) -> str:
     Clean text for PDF — replace Unicode characters and sanitize LaTeX.
     """
     text = _sanitize_latex(text)
-    
+
     replacements: dict[str, str] = {
         "\u2018": "'", "\u2019": "'",
         "\u201c": '"', "\u201d": '"',
@@ -122,7 +122,7 @@ def _clean_text(text: str) -> str:
     }
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
-    
+
     # Replace non-latin1 characters with space to prevent word joining
     # This fixes issues like 'mechanicssuperposition'
     cleaned = []
@@ -188,7 +188,7 @@ def export_pdf(content: str, filename: str) -> bytes:
     def render_text_with_code(pdf, text, current_x=None, line_height=6):
         if current_x is not None:
             pdf.set_x(current_x)
-        
+
         # Split by backticks first for code blocks
         parts = re.split(r'(`[^`]+`)', text)
         for part in parts:
@@ -205,15 +205,15 @@ def export_pdf(content: str, filename: str) -> bytes:
                     if m_link:
                         link_text = m_link.group(1)
                         link_url = m_link.group(2)
-                        
+
                         pdf.set_text_color(50, 80, 180) # Link blue
                         pdf.set_font("Helvetica", "U", pdf.font_size_pt)
-                        
+
                         # If link text is different from URL, show both for clarity
                         display_text = link_text
                         if link_text.strip() != link_url.strip() and not link_url.endswith(link_text):
                             display_text = f"{link_text} ({link_url})"
-                        
+
                         pdf.write(line_height, display_text, link_url)
                         pdf.set_text_color(40, 40, 50) # Reset
                         pdf.set_font("Helvetica", pdf.font_style, pdf.font_size_pt)
@@ -264,7 +264,8 @@ def export_pdf(content: str, filename: str) -> bytes:
         def proper_title_case(s):
             small_words = {'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'with', 'in', 'of'}
             words = s.split()
-            if not words: return ""
+            if not words:
+                return ""
             result = [words[0].capitalize()]
             for word in words[1:]:
                 result.append(word.lower() if word.lower() in small_words else word.capitalize())
@@ -288,9 +289,9 @@ def export_pdf(content: str, filename: str) -> bytes:
 
         # ---- Process content line by line ----
         pdf.set_text_color(30, 30, 40)
-        
+
         table_buffer: list[list[str]] = []
-        
+
         def flush_table():
             if not table_buffer:
                 return
@@ -317,7 +318,7 @@ def export_pdf(content: str, filename: str) -> bytes:
 
         for i, line in enumerate(content.split("\n")):
             stripped: str = line.strip()
-            
+
             # ---- Code block detection (``` ... ```) ----
             if stripped.startswith("```"):
                 if in_code_block:
@@ -439,7 +440,7 @@ def export_pdf(content: str, filename: str) -> bytes:
             # Bullet / list items — use wider indent to prevent corner overflow
             if re.match(r"^[-*\u2022]\s+", stripped):
                 bullet_content: str = re.sub(r"^[-*\u2022]\s+", "", stripped)
-                
+
                 # Check for inline links in bullet
                 link_matches = list(re.finditer(r'\[([^\]]+)\]\((https?://[^)]+)\)', bullet_content))
                 if link_matches:
@@ -486,7 +487,7 @@ def export_pdf(content: str, filename: str) -> bytes:
                 render_text_with_code(pdf, item_text)
                 pdf.ln(7.5)
                 continue
-                
+
             # Blockquotes
             m_quote = re.match(r"^>\s*(.+)$", stripped)
             if m_quote:

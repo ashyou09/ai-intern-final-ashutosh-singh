@@ -14,9 +14,10 @@ Example:
 The result is printed to stdout as a string, which the parent process captures.
 """
 
-import sys
-import json
 import asyncio
+import json
+import sys
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
