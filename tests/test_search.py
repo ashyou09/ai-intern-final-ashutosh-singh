@@ -173,3 +173,37 @@ def test_gather_sources_searches_every_query_and_interleaves(monkeypatch):
     assert [s.title for s in sources[:4]] == ["topic-0", "sub one-0", "topic-1", "sub one-1"]
     assert sources[-1].kind == "paper"
     assert [s.id for s in sources] == list(range(1, len(sources) + 1))
+
+
+def test_mcp_failure_pauses_mcp(monkeypatch):
+    calls = []
+
+    def broken_mcp(**kwargs):
+        calls.append(1)
+        raise RuntimeError("subprocess not allowed")
+
+    monkeypatch.setattr(search, "call_tool_subprocess", broken_mcp)
+    monkeypatch.setattr(search, "_ddgs_text", lambda q, n: [{"title": "T", "href": "https://t.com", "body": ""}])
+    search.web_search("q", 3)
+    assert search.mcp_status() == "paused"
+    assert len(search.web_search("q", 3)) == 1
+    assert len(calls) == 1          # the second search skipped MCP
+
+
+def test_mcp_tool_error_does_not_pause(monkeypatch):
+    monkeypatch.setattr(search, "call_tool_subprocess", lambda **kw: '[{"error": "ratelimit"}]')
+    monkeypatch.setattr(search, "_ddgs_text", lambda q, n: [])
+    search.web_search("q", 3)
+    assert search.mcp_status() == "enabled"
+
+
+def test_use_mcp_false_skips_mcp(monkeypatch):
+    monkeypatch.setattr(search.settings, "use_mcp", False)
+
+    def must_not_run(**kwargs):
+        raise AssertionError("MCP should be skipped")
+
+    monkeypatch.setattr(search, "call_tool_subprocess", must_not_run)
+    monkeypatch.setattr(search, "_ddgs_text", lambda q, n: [{"title": "T", "href": "https://t.com", "body": ""}])
+    assert [r.url for r in search.web_search("q", 3)] == ["https://t.com"]
+    assert search.mcp_status() == "disabled"

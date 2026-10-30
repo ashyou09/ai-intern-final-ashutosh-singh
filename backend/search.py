@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
 from typing import Literal
@@ -78,14 +79,23 @@ def _ddgs_text(query: str, num_results: int) -> list[dict[str, str]]:
     return list(DDGS().text(query, max_results=min(num_results, 10)))
 
 
-def web_search(query: str, num_results: int = 6) -> list[Source]:
-    """
-    Search the web. Tries the MCP server first, then direct DuckDuckGo.
+# When the MCP server fails (e.g. subprocesses are not allowed on a host),
+# skip it for a while instead of paying the timeout on every request.
+_mcp_paused_until: float = 0.0
 
-    Blocking — call it via asyncio.to_thread from async code.
-    """
-    items: list[dict[str, str]] | None = None
 
+def mcp_status() -> str:
+    """'enabled', 'disabled' (USE_MCP=false) or 'paused' (recent failure)."""
+    if not settings.use_mcp:
+        return "disabled"
+    return "paused" if time.monotonic() < _mcp_paused_until else "enabled"
+
+
+def _mcp_web_search(query: str, num_results: int) -> list[dict[str, str]] | None:
+    """Run the MCP web_search tool. Returns None if MCP is off or failed."""
+    global _mcp_paused_until
+    if mcp_status() != "enabled":
+        return None
     try:
         raw: str = call_tool_subprocess(
             server_script="mcp_servers/web_search_server.py",
@@ -94,12 +104,25 @@ def web_search(query: str, num_results: int = 6) -> list[Source]:
         )
         data = json.loads(raw)
         if isinstance(data, list) and not any("error" in item for item in data):
-            items = data
             logger.info("[MCP] web_search succeeded via MCP subprocess")
-        else:
-            logger.warning(f"[MCP] web_search returned an error: {raw[:200]}")
+            return data
+        # The tool ran but the search engine failed — not an MCP problem, don't pause
+        logger.warning(f"[MCP] web_search returned an error: {raw[:200]}")
+        return None
     except Exception as e:
-        logger.warning(f"[MCP] web_search failed, falling back to direct: {e}")
+        _mcp_paused_until = time.monotonic() + settings.mcp_retry_after
+        logger.warning(f"[MCP] web_search failed, using DuckDuckGo directly for "
+                       f"{settings.mcp_retry_after}s: {e}")
+        return None
+
+
+def web_search(query: str, num_results: int = 6) -> list[Source]:
+    """
+    Search the web. Tries the MCP server first, then direct DuckDuckGo.
+
+    Blocking — call it via asyncio.to_thread from async code.
+    """
+    items: list[dict[str, str]] | None = _mcp_web_search(query, num_results)
 
     if items is None:
         try:

@@ -11,6 +11,7 @@ from backend.agent import get_model_chain, run_research_workflow
 from backend.exporter import export_md, export_pdf, export_txt
 from backend.providers import PROVIDERS
 from backend.ratelimit import research_rate_limit
+from backend.search import mcp_status
 from backend.utils import ExportRequest, ResearchRequest, logger
 
 router = APIRouter()
@@ -24,8 +25,8 @@ _EXPORTERS = {
 
 @router.get("/health")
 async def health() -> dict[str, object]:
-    """Liveness check. Also reports which models are configured (never the keys)."""
-    return {"status": "ok", "models": [m.model for m in get_model_chain()]}
+    """Liveness check. Reports the configured models (never the keys) and MCP status."""
+    return {"status": "ok", "models": [m.model for m in get_model_chain()], "mcp": mcp_status()}
 
 
 @router.get("/providers")

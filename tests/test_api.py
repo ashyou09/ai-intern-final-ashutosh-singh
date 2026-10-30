@@ -8,6 +8,7 @@ def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+    assert resp.json()["mcp"] in {"enabled", "disabled", "paused"}
 
 
 def test_frontend_is_served(client):

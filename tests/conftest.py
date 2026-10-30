@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import backend.agent as agent
 import backend.ratelimit as ratelimit
+import backend.search as search
 from backend.main import app
 
 
@@ -26,3 +27,8 @@ def reset_rate_limits():
     """Rate limits never carry over between tests."""
     ratelimit.minute_limiter.reset()
     ratelimit.hour_limiter.reset()
+
+
+@pytest.fixture(autouse=True)
+def reset_mcp_pause():
+    search._mcp_paused_until = 0.0

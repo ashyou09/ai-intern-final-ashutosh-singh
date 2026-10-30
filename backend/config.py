@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     page_chars: int = 2500        # max characters of text kept per page
     page_timeout: float = 8.0
     http_timeout: float = 15.0
-    mcp_timeout: int = 30
+    use_mcp: bool = True          # run web search through the MCP server (false = call DuckDuckGo directly)
+    mcp_timeout: int = 20
+    mcp_retry_after: int = 300    # after an MCP failure, skip MCP for this many seconds
 
     # Rate limits for POST /research, per client IP (0 = unlimited)
     rate_limit_per_minute: int = 5
